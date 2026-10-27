@@ -1,3 +1,8 @@
+import {
+  sportsDivisions,
+  sportsModules,
+  universeStages,
+} from "../../../portal-os/manifold";
 import { executionCapacity } from "./execution";
 import type { Env } from "./types";
 import {
@@ -117,7 +122,7 @@ export async function captureIntelligence(env: Env) {
     ),
   );
 }
-async function graph(env: Env) {
+export async function graph(env: Env) {
   const u = await readUniverse(env);
   const approvals = await rows<{
     id: string;
@@ -167,12 +172,14 @@ async function graph(env: Env) {
       label: a.action,
       status: a.status,
     })),
-    ...[...new Set(u.products.map((p) => p.stage))].map((stage) => ({
-      id: `pipeline:${stage}`,
-      kind: "pipeline",
-      label: stage,
-      status: "Lifecycle stage",
-    })),
+    ...[...new Set([...universeStages, ...u.products.map((p) => p.stage)])].map(
+      (stage) => ({
+        id: `pipeline:${stage}`,
+        kind: "pipeline",
+        label: stage,
+        status: "Lifecycle stage",
+      }),
+    ),
   ];
   const edges: GraphEdge[] = [];
   const add = (source: string, target: string, relation: string) =>
@@ -205,6 +212,65 @@ async function graph(env: Env) {
       target: `product:${r.targetId}`,
       relation: r.relation,
     });
+  const releases = await rows<{
+    id: string;
+    name: string;
+    productId: string;
+    withdrawnAt: string | null;
+  }>(
+    env,
+    "SELECT m.id,p.name,m.product_id AS productId,m.withdrawn_at AS withdrawnAt FROM marketplace_releases m JOIN products p ON p.id=m.product_id ORDER BY m.id LIMIT 5001",
+  );
+  for (const r of releases) {
+    nodes.push({
+      id: `marketplace:${r.id}`,
+      kind: "marketplace",
+      label: r.name,
+      status: r.withdrawnAt ? "Withdrawn" : "Published",
+    });
+    add(`product:${r.productId}`, `marketplace:${r.id}`, "offers");
+  }
+  if (u.divisions.some((d) => d.id === "max-sports")) {
+    for (const label of [...sportsDivisions, ...sportsModules]) {
+      const id = `sports:${label.toLowerCase().replaceAll(" ", "-")}`;
+      nodes.push({
+        id,
+        kind: sportsDivisions.includes(label) ? "subdivision" : "module",
+        label,
+        status: "No intelligence feed configured",
+        divisionId: "max-sports",
+      });
+      add("division:max-sports", id, "contains");
+    }
+  }
+  const sportsObservations = await rows<{
+    id: string;
+    subdivision: string;
+    module: string;
+    subject: string;
+    productId: string | null;
+  }>(
+    env,
+    "SELECT id,subdivision,module,subject,product_id AS productId FROM sports_observations ORDER BY id LIMIT 5001",
+  );
+  for (const observation of sportsObservations) {
+    const id = `sports-observation:${observation.id}`;
+    nodes.push({
+      id,
+      kind: "sports-observation",
+      label: observation.subject,
+      status: "Recorded source observation",
+      divisionId: "max-sports",
+    });
+    for (const label of [observation.subdivision, observation.module]) {
+      const parent = `sports:${label.toLowerCase().replaceAll(" ", "-")}`;
+      add(parent, id, "observes");
+      const node = nodes.find((n) => n.id === parent);
+      if (node) node.status = "Source observations available";
+    }
+    if (observation.productId)
+      add(id, `product:${observation.productId}`, "informs");
+  }
   return { schemaVersion: 1, nodes, edges, sampledAt: u.sampledAt };
 }
 const validString = (v: unknown, max = 120): v is string =>
@@ -546,6 +612,8 @@ export async function universeApi(
         const scene = path.slice("/api/xr/".length);
         if (!scenes.includes(scene as (typeof scenes)[number]))
           return json({ error: "XR scene not found" }, 404);
+        if (scene === "max-sports-intelligence-center")
+          selected = topology(g.nodes, g.edges, "division:max-sports", 2);
         if (scene === "quantum-xr-command-room")
           selected = topology(g.nodes, g.edges, "division:quantum-xr", 2);
         if (scene === "product-constellation") {

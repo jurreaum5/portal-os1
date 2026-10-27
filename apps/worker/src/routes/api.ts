@@ -1,3 +1,6 @@
+import { sportsApi } from "../sports-api";
+import { manifoldApi } from "../manifold-api";
+import { bemaxApi } from "../bemax-api";
 import { universeApi } from "../universe-api";
 import { staffIdentity } from "../access";
 import type { Env } from "../types";
@@ -13,6 +16,12 @@ const json = (value: unknown, status = 200) => Response.json(value, { status });
 
 export async function routeApi(request: Request, env: Env): Promise<Response> {
   const path = new URL(request.url).pathname;
+  const sports = await sportsApi(request, env);
+  if (sports) return sports;
+  const manifold = await manifoldApi(request, env);
+  if (manifold) return manifold;
+  const bemax = await bemaxApi(request, env);
+  if (bemax) return bemax;
   const universe = await universeApi(request, env);
   if (universe) return universe;
   const operational = await operationalApi(request, env);

@@ -3953,3 +3953,201 @@ td {
     grid-template-columns: 1fr;
   }
 }
+
+/* MAX Universe V3 */
+.universe-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 24px;
+}
+.universe-tabs a {
+  border: 1px solid #d9dce5;
+  border-radius: 24px;
+  padding: 9px 16px;
+  background: #fff;
+  color: #48455f;
+  font-size: 13px;
+}
+.bemax-layout {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.bemax-history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-self: start;
+}
+.bemax-history button {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.bemax-history label {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+.bemax-history select {
+  width: 100%;
+}
+.bemax-welcome {
+  text-align: center;
+  padding: 24px 0;
+}
+.bemax-orb {
+  display: grid;
+  place-items: center;
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 22px;
+  border-radius: 50%;
+  font-size: 38px;
+  color: #245c56;
+  background: radial-gradient(circle at 30% 20%, #ecfff5, #acd7d1 70%, #aca3d5);
+  box-shadow: 0 8px 32px #afc5d455;
+}
+.bemax-prompts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 25px;
+}
+.bemax-prompts button {
+  text-align: left;
+  padding: 16px;
+}
+.bemax-conversation {
+  min-width: 0;
+}
+.bemax-compose {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid #e7e7ed;
+  padding-top: 20px;
+  margin-top: 20px;
+}
+.bemax textarea {
+  width: 100%;
+  min-height: 85px;
+  resize: vertical;
+}
+.bemax-compose button {
+  justify-self: end;
+}
+.bemax-message {
+  padding: 20px 0;
+  border-bottom: 1px solid #e8e7ee;
+}
+.bemax-message.user {
+  background: #f5f4fa;
+  padding: 18px;
+  border-radius: 14px;
+}
+.bemax-message p,
+.bemax-memory {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bemax-message small {
+  color: #68677c;
+}
+.bemax-message details {
+  margin-top: 18px;
+}
+.bemax-reason {
+  padding: 18px;
+  margin-top: 12px;
+  border: 1px solid #e0dfea;
+  border-radius: 12px;
+}
+.bemax-reason button {
+  display: block;
+  margin-top: 12px;
+}
+.bemax-action {
+  border-top: 1px solid #e6e5ec;
+  margin-top: 20px;
+  padding-top: 12px;
+}
+.bemax-action pre {
+  max-height: 350px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bemax summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.bemax-embedded {
+  margin-top: 20px;
+}
+.galaxy {
+  width: 100%;
+  height: auto;
+  min-height: 280px;
+}
+.galaxy-panel {
+  overflow: hidden;
+}
+.constellation-grid,
+.sports-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+}
+.constellation-grid article,
+.sports-grid article {
+  padding: 20px;
+  border: 1px solid #e1e3eb;
+  border-radius: 16px;
+  background: #fcfcfe;
+}
+.constellation-grid h3 {
+  font-size: 20px;
+}
+.constellation-grid h4 {
+  margin-bottom: 8px;
+}
+.universe-pipeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+.pipeline-count {
+  font-size: 38px;
+}
+.universe-pipeline dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  font-size: 13px;
+}
+.universe-pipeline dd {
+  margin: 0;
+}
+.bemax .notice {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 900px) {
+  .bemax-layout {
+    grid-template-columns: 1fr;
+  }
+  .bemax-history {
+    max-height: 240px;
+    overflow: auto;
+  }
+  .bemax-prompts {
+    grid-template-columns: 1fr;
+  }
+  .galaxy {
+    min-height: 0;
+  }
+  .constellation-grid,
+  .sports-grid {
+    grid-template-columns: 1fr;
+  }
+}

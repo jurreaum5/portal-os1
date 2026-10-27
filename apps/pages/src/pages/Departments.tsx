@@ -1,3 +1,4 @@
+import { UniverseNav } from "./Universe";
 import { api } from "../api/client";
 import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
@@ -32,6 +33,7 @@ export default function Departments() {
         </div>
         <RefreshControl {...state} />
       </div>
+      <UniverseNav />
       <AsyncState {...state} retry={state.reload} />
       <div className="department-grid">
         {state.data?.map((d) => (

@@ -1,4 +1,12 @@
 export interface Env {
+  OPENAI_API_KEY?: string;
+  OPENAI_MODEL?: string;
+  GEMINI_API_KEY?: string;
+  GEMINI_MODEL?: string;
+  ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_MODEL?: string;
+  BEMAX_LOCAL?: Fetcher;
+  BEMAX_MAX?: Fetcher;
   ICVS_EXECUTOR?: Fetcher;
   ICVS_PUBLISHER?: Fetcher;
   ICVS_COMPENSATOR?: Fetcher;

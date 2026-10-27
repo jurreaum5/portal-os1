@@ -2,6 +2,9 @@ import { useGovernor } from "../layouts/GovernorLayout";
 import { NavLink, Link } from "react-router-dom";
 import { Icon } from "./Icon";
 const links = [
+  ["/portal/bemax", "spark", "BEMAX"],
+  ["/portal/universe", "globe", "Universe galaxy"],
+  ["/portal/universe/sports", "globe", "MAX Sports"],
   ["/portal/governor", "governance", "Governor console"],
   ["/portal/ecosystem", "globe", "MAX Universe"],
   ["/portal/intelligence", "spark", "Intelligence"],
@@ -82,7 +85,7 @@ export function Sidebar() {
         <div className="edge-note">
           <span className="status-dot" />
           <span>Cloudflare edge workspace</span>
-          <span className="edge-version">v2</span>
+          <span className="edge-version">v3</span>
         </div>
         <Link className="profile" to="/settings">
           <span className="profile-avatar">MJ</span>

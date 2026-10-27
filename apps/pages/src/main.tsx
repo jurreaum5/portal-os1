@@ -1,3 +1,6 @@
+import Bemax from "./pages/Bemax";
+import Universe from "./pages/Universe";
+import UniversePipeline from "./pages/UniversePipeline";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Link, Navigate } from "react-router-dom";
@@ -61,6 +64,24 @@ createRoot(document.getElementById("root")!).render(
         <Routes>
           <Route element={<MainLayout />}>
             <Route index element={<RoleHome />} />
+            <Route path="portal/bemax" element={<Bemax />} />
+            <Route path="portal/universe" element={<Universe />} />
+            <Route
+              path="portal/universe/products"
+              element={<Universe products />}
+            />
+            <Route
+              path="portal/universe/pipeline"
+              element={<UniversePipeline />}
+            />
+            <Route
+              path="portal/universe/departments"
+              element={<Departments />}
+            />
+            <Route
+              path="portal/universe/sports"
+              element={<Universe sports />}
+            />
             <Route path="portal/dashboard" element={<Dashboard />} />
             <Route path="portal/products" element={<Products />} />
             <Route path="portal/products/:id" element={<ProductDetail />} />

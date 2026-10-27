@@ -125,7 +125,9 @@ export async function protectPortal(
     return Response.json({ error: "Staff sign-in required" }, { status: 401 });
   const path = new URL(request.url).pathname;
   const governorOnly =
-    request.method !== "GET" || ["/api/decisions"].includes(path);
+    (request.method !== "GET" &&
+      !(request.method === "POST" && path === "/api/bemax/chat")) ||
+    ["/api/decisions"].includes(path);
   if (governorOnly && identity.role !== "Governor")
     return Response.json(
       { error: "Governor permission required" },

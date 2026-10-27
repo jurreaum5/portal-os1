@@ -226,6 +226,7 @@ export const scenes = [
   "pipeline-universe",
   "department-operations",
   "quantum-xr-command-room",
+  "max-sports-intelligence-center",
 ] as const;
 export function topology(
   nodes: GraphNode[],

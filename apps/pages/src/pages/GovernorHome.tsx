@@ -1,3 +1,4 @@
+import Bemax from "./Bemax";
 import { SystemStatus } from "../components/SystemStatus";
 import { Link } from "react-router-dom";
 import { getEcosystem } from "../api/universe";
@@ -20,10 +21,11 @@ export default function GovernorHome() {
           </h1>
           <p>Approve. Reject. Override. ICVS handles operational execution.</p>
         </div>
-        <Link className="button" to="/portal/ecosystem">
+        <Link className="button" to="/portal/universe">
           Explore MAX Universe ↗
         </Link>
       </div>
+      <Bemax embedded />
       <AsyncState {...state} retry={state.reload} />
       {state.data && (
         <>

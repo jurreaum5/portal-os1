@@ -71,3 +71,11 @@ Migration 0005 adds QA and audit tables while preserving existing products, deci
 ## MAX Universe v2
 
 [Command centres, intelligence, digital twins, XR data and execution contracts](docs/08_MAX_UNIVERSE_V2.md). Apply additive migration 0007 before upgrading the private Worker. Governors enter at `/portal/governor`; staff enter at `/portal/ecosystem`.
+
+## MAX Universe V3 runtime
+
+BEMAX conversation and persistent memory, ICV identities, Universe scenes, Sports
+source intelligence, governed proposals and replaceable model adapters are described
+in [the V3 runtime guide](docs/09_MAX_UNIVERSE_V3.md). Apply migrations 0008 and 0009.
+Start at `/portal/bemax` or `/portal/governor`. See the guide for execution boundaries
+and production integrations that still require configuration.
