@@ -383,6 +383,16 @@ export class ProductFactoryActor extends DurableObject<Env> {
         );
       }
       case "Ready": {
+        const identity = await this.env.DB.prepare(
+          "SELECT state FROM universe_identities WHERE id=?",
+        )
+          .bind(`product:${state.productId}`)
+          .first<string>("state");
+        const notBefore = identity
+          ? JSON.parse(identity).publishingNotBefore
+          : undefined;
+        if (typeof notBefore === "string" && Date.parse(notBefore) > Date.now())
+          return this.block(state, "Awaiting governed publishing schedule");
         if (state.version !== 2) return;
         if (
           !state.package ||
@@ -694,7 +704,13 @@ export class ProductFactoryActor extends DurableObject<Env> {
       if (expires <= now) delete leases[key];
     if (path === "/release") delete leases[owner];
     else {
-      const capacity = executionCapacity(this.env.ICVS_EXECUTION_SLOTS);
+      const pool = await this.env.DB.prepare(
+        "SELECT json_extract(state,'$.capacity') AS capacity FROM universe_identities WHERE id='resource:execution'",
+      ).first<{ capacity: number | null }>();
+      const capacity = Math.min(
+        executionCapacity(this.env.ICVS_EXECUTION_SLOTS),
+        pool?.capacity ?? Infinity,
+      );
       if (!leases[owner] && Object.keys(leases).length >= capacity)
         return Response.json({ allocated: false }, { status: 429 });
       leases[owner] = now + 60_000;

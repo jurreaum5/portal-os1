@@ -71,3 +71,11 @@ Migration 0005 adds QA and audit tables while preserving existing products, deci
 ## MAX Universe v2
 
 [Command centres, intelligence, digital twins, XR data and execution contracts](docs/08_MAX_UNIVERSE_V2.md). Apply additive migration 0007 before upgrading the private Worker. Governors enter at `/portal/governor`; staff enter at `/portal/ecosystem`.
+
+## MAX Universe completion capabilities
+
+[Identity continuity, BEMAX, governed autonomy, Sports, Institute, shared simulation,
+XR readiness and portable model routing](docs/09_MAX_UNIVERSE_COMPLETION.md).
+Apply additive migration 0008 before upgrading. BEMAX is the new Portal home;
+existing Governor and ecosystem URLs remain available. Live production intelligence
+requires configured provider adapters and verified external evidence.

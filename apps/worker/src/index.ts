@@ -1,3 +1,9 @@
+import { refreshSports } from "./sports";
+import { synchroniseIdentities } from "./universe-store";
+import {
+  applyOperationalProposals,
+  evaluateAutonomyRules,
+} from "./completion-api";
 import { captureIntelligence } from "./universe-api";
 import { reconcileCompensation } from "./execution";
 import { protectPortal, auditAccess } from "./access";
@@ -13,6 +19,14 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ) {
+    if (env.SPORTS_FEED && env.SPORTS_CONFIG) ctx.waitUntil(refreshSports(env));
+    ctx.waitUntil(
+      (async () => {
+        await synchroniseIdentities(env);
+        await evaluateAutonomyRules(env);
+        await applyOperationalProposals(env);
+      })(),
+    );
     ctx.waitUntil(captureIntelligence(env));
     ctx.waitUntil(reconcileCompensation(env));
     ctx.waitUntil(

@@ -1,3 +1,4 @@
+import { identityGraph } from "./universe-store";
 import { executionCapacity } from "./execution";
 import type { Env } from "./types";
 import {
@@ -35,7 +36,12 @@ async function rows<T>(
 }
 export async function readUniverse(env: Env) {
   const [products, divisions, relationships, runs] = await Promise.all([
-    rows<TwinProduct>(
+    rows<
+      TwinProduct & {
+        escalationReason: string | null;
+        escalationSeverity: string | null;
+      }
+    >(
       env,
       `SELECT p.id,p.name,p.division_id AS divisionId,p.stage,p.status,p.score,p.revenue,
    (SELECT users FROM product_telemetry t WHERE t.product_id=p.id AND julianday(t.observed_at)>=julianday('now','-1 day') ORDER BY observed_at DESC LIMIT 1) AS users,
@@ -43,6 +49,8 @@ export async function readUniverse(env: Env) {
    (SELECT observed_at FROM product_telemetry t WHERE t.product_id=p.id ORDER BY observed_at DESC LIMIT 1) AS telemetryAt,
    (SELECT revenue FROM intelligence_snapshots s WHERE s.product_id=p.id AND s.day<=date('now','-7 days') ORDER BY day DESC LIMIT 1) AS previousRevenue,
    (SELECT COUNT(*) FROM factory_runs r WHERE r.product_id=p.id AND r.status='blocked') AS blockedRuns
+   ,(SELECT json_extract(i.state,'$.risk.reason') FROM universe_identities i WHERE i.id='product:'||p.id) AS escalationReason
+   ,(SELECT json_extract(i.state,'$.risk.severity') FROM universe_identities i WHERE i.id='product:'||p.id) AS escalationSeverity
    FROM products p ORDER BY p.id LIMIT 5001`,
     ),
     rows<Division>(
@@ -76,6 +84,9 @@ export async function readUniverse(env: Env) {
     const deps = dependencyMap.get(p.id) ?? [];
     return {
       ...p,
+      escalations: p.escalationReason
+        ? [`Governed ${p.escalationSeverity} risk: ${p.escalationReason}`]
+        : [],
       dependencies: deps,
       blockedDependencies: deps.filter((id) => {
         const target = byId.get(id);
@@ -111,13 +122,16 @@ export async function captureIntelligence(env: Env) {
         `INSERT INTO department_snapshots(department,day,queued,running,blocked)
  SELECT ?,date('now'),COUNT(*),COALESCE(SUM(EXISTS(SELECT 1 FROM factory_runs r WHERE r.product_id=p.id AND r.status='running')),0),
  COALESCE(SUM(EXISTS(SELECT 1 FROM factory_runs r WHERE r.product_id=p.id AND r.status='blocked')),0) FROM products p
- WHERE ${d.id === "GOV" ? "EXISTS (SELECT 1 FROM approvals a WHERE a.product_id=p.id AND a.status='pending')" : `p.stage IN (${d.stages.map(() => "?").join(",") || "''"})`}
+ WHERE ${d.id === "GOV" ? "EXISTS (SELECT 1 FROM approvals a WHERE a.product_id=p.id AND a.status='pending')" : `((NOT EXISTS (SELECT 1 FROM universe_identities i WHERE i.id='product:'||p.id AND json_type(i.state,'$.assignment')='object') AND p.stage IN (${d.stages.map(() => "?").join(",") || "''"})) OR EXISTS (SELECT 1 FROM universe_identities i WHERE i.id='product:'||p.id AND json_extract(i.state,'$.assignment.departmentId')=?))`}
  ON CONFLICT(department,day) DO UPDATE SET queued=excluded.queued,running=excluded.running,blocked=excluded.blocked`,
-      ).bind(d.id, ...(d.id === "GOV" ? [] : d.stages)),
+      ).bind(
+        d.id,
+        ...(d.id === "GOV" ? [] : [...d.stages, `department:${d.id}`]),
+      ),
     ),
   );
 }
-async function graph(env: Env) {
+export async function graph(env: Env) {
   const u = await readUniverse(env);
   const approvals = await rows<{
     id: string;
@@ -205,6 +219,18 @@ async function graph(env: Env) {
       target: `product:${r.targetId}`,
       relation: r.relation,
     });
+  const extra = await identityGraph(env);
+  const known = new Set(nodes.map((n) => n.id));
+  for (const node of extra.nodes) {
+    if (!known.has(node.id)) {
+      nodes.push(node);
+      known.add(node.id);
+    } else if (node.scenes)
+      nodes.find((n) => n.id === node.id)!.scenes = node.scenes;
+  }
+  edges.push(
+    ...extra.edges.filter((e) => known.has(e.source) && known.has(e.target)),
+  );
   return { schemaVersion: 1, nodes, edges, sampledAt: u.sampledAt };
 }
 const validString = (v: unknown, max = 120): v is string =>
@@ -546,8 +572,28 @@ export async function universeApi(
         const scene = path.slice("/api/xr/".length);
         if (!scenes.includes(scene as (typeof scenes)[number]))
           return json({ error: "XR scene not found" }, 404);
-        if (scene === "quantum-xr-command-room")
-          selected = topology(g.nodes, g.edges, "division:quantum-xr", 2);
+        if (
+          scene === "quantum-xr-command-room" ||
+          scene === "sports-intelligence-center"
+        ) {
+          const roots = g.nodes.filter(
+            (n) =>
+              n.scenes?.includes(scene) ||
+              (scene === "sports-intelligence-center" &&
+                n.kind.startsWith("sports-")),
+          );
+          const ids = new Set(
+            roots.flatMap((n) =>
+              topology(g.nodes, g.edges, n.id, 1).nodes.map((v) => v.id),
+            ),
+          );
+          selected = {
+            nodes: g.nodes.filter((n) => ids.has(n.id)),
+            edges: g.edges.filter(
+              (e) => ids.has(e.source) && ids.has(e.target),
+            ),
+          };
+        }
         if (scene === "product-constellation") {
           const ids = new Set(
             g.nodes.filter((n) => n.kind === "product").map((n) => n.id),
@@ -574,7 +620,10 @@ export async function universeApi(
             ),
           };
         }
-        if (scene === "department-operations") {
+        if (
+          scene === "department-operations" ||
+          scene === "department-operations-center"
+        ) {
           const ids = new Set(
             g.nodes
               .filter((n) =>

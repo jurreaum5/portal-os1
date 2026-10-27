@@ -1,3 +1,5 @@
+import Bemax from "./pages/Bemax";
+import Completion from "./pages/Completion";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Link, Navigate } from "react-router-dom";
@@ -29,16 +31,7 @@ import MarketplaceOperations from "./pages/MarketplaceOperations";
 import GovernorHome from "./pages/GovernorHome";
 import { useGovernor } from "./layouts/GovernorLayout";
 function RoleHome() {
-  return (
-    <Navigate
-      replace
-      to={
-        useGovernor().role === "Governor"
-          ? "/portal/governor"
-          : "/portal/ecosystem"
-      }
-    />
-  );
+  return <Navigate replace to={"/portal/bemax"} />;
 }
 function GovernorOnly({ children }: { children: React.ReactNode }) {
   return useGovernor().role === "Governor" ? (
@@ -61,6 +54,21 @@ createRoot(document.getElementById("root")!).render(
         <Routes>
           <Route element={<MainLayout />}>
             <Route index element={<RoleHome />} />
+            <Route path="portal/bemax" element={<Bemax />} />
+            {[
+              "identity",
+              "autonomy",
+              "sports",
+              "institute",
+              "substrate",
+              "models",
+            ].map((area) => (
+              <Route
+                key={area}
+                path={`portal/${area}`}
+                element={<Completion key={area} area={area} />}
+              />
+            ))}
             <Route path="portal/dashboard" element={<Dashboard />} />
             <Route path="portal/products" element={<Products />} />
             <Route path="portal/products/:id" element={<ProductDetail />} />

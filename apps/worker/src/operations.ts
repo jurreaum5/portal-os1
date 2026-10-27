@@ -433,12 +433,36 @@ export async function operationalApi(
         .all<{ id: string }>()
     ).results.map((row) => row.id),
   );
+  const assignments = (
+    await db
+      .prepare(
+        "SELECT id,state FROM universe_identities WHERE kind='product' AND json_type(state,'$.assignment')='object' LIMIT 5001",
+      )
+      .all<{ id: string; state: string }>()
+  ).results;
+  if (assignments.length > 5000)
+    return json({ error: "Assignment projection exceeds 5000 products" }, 413);
+  const assignedTo = new Map(
+    assignments.map((a) => [
+      a.id.slice(8),
+      JSON.parse(a.state).assignment.departmentId,
+    ]),
+  );
   return json(
     await Promise.all(
       departments.map(async (d) => {
         const queue = products.filter((p) =>
-          d.id === "GOV" ? pendingIds.has(p.id) : d.stages.includes(p.stage),
+          d.id === "GOV"
+            ? pendingIds.has(p.id)
+            : assignedTo.has(p.id)
+              ? assignedTo.get(p.id) === `department:${d.id}`
+              : d.stages.includes(p.stage),
         );
+        const operational = await db
+          .prepare("SELECT state FROM universe_identities WHERE id=?")
+          .bind(`department:${d.id}`)
+          .first<string>("state");
+        const governed = operational ? JSON.parse(operational) : {};
         const outputs = (
           await db
             .prepare(
@@ -449,10 +473,13 @@ export async function operationalApi(
         ).results;
         return {
           ...d,
+          operationalState: governed,
           ...departmentMetrics(
             queue,
             runs,
-            configuredCapacity(env.DEPARTMENT_CAPACITY, d.id),
+            typeof governed.capacity === "number"
+              ? governed.capacity
+              : configuredCapacity(env.DEPARTMENT_CAPACITY, d.id),
             exits
               .filter((e) => d.stages.includes(e.stage))
               .reduce((sum, e) => sum + e.count, 0),

@@ -3953,3 +3953,63 @@ td {
     grid-template-columns: 1fr;
   }
 }
+
+/* Completion views use the existing command-centre visual system. */
+.completion-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.completion-entry {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border, #e9e6ef);
+  overflow-wrap: anywhere;
+}
+.completion-entry p {
+  margin: 8px 0;
+}
+.completion-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 18px 0;
+}
+.completion-entities {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+.completion-entities a {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border, #e9e6ef);
+  border-radius: 12px;
+}
+.completion-fields div {
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+}
+.completion-fields dt {
+  font-weight: 600;
+}
+.completion-fields dd {
+  margin: 4px 0 0;
+}
+.completion-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+.completion-reason input {
+  max-width: 640px;
+  padding: 12px;
+}
+@media (max-width: 900px) {
+  .completion-columns {
+    grid-template-columns: 1fr;
+  }
+}

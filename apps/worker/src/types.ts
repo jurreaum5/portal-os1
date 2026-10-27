@@ -1,4 +1,9 @@
 export interface Env {
+  AUTONOMY_RULES?: string;
+  MODEL_CONFIG?: string;
+  MODEL_CREDENTIALS?: string;
+  SPORTS_CONFIG?: string;
+  SPORTS_FEED?: Fetcher;
   ICVS_EXECUTOR?: Fetcher;
   ICVS_PUBLISHER?: Fetcher;
   ICVS_COMPENSATOR?: Fetcher;

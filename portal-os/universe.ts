@@ -14,6 +14,7 @@ export interface TwinProduct {
   dependencies: string[];
   blockedDependencies: string[];
   blockedRuns: number;
+  escalations?: string[];
 }
 export interface Division {
   id: string;
@@ -30,6 +31,7 @@ export function growth(
 }
 export function analyseProduct(p: TwinProduct) {
   const risks = [
+    ...(p.escalations ?? []),
     ...(p.status === "Attention" ? ["Product is flagged for attention."] : []),
     ...(p.status === "Paused" ? ["Product operations are paused."] : []),
     ...(p.blockedRuns
@@ -208,6 +210,7 @@ export function analyseUniverse(
 }
 export type Universe = ReturnType<typeof analyseUniverse>;
 export interface GraphNode {
+  scenes?: string[];
   id: string;
   kind: string;
   label: string;
@@ -225,6 +228,8 @@ export const scenes = [
   "product-constellation",
   "pipeline-universe",
   "department-operations",
+  "department-operations-center",
+  "sports-intelligence-center",
   "quantum-xr-command-room",
 ] as const;
 export function topology(

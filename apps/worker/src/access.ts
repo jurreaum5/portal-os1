@@ -100,12 +100,23 @@ export async function protectPortal(
         ) {
           const path = new URL(request.url).pathname;
           const scope =
-            path === "/api/twin/telemetry"
-              ? "telemetry:write"
-              : path === "/api/twin/relationships" ||
-                  /^\/api\/twin\/relationships\/[^/]+\/retire$/.test(path)
-                ? "relationships:write"
-                : null;
+            path === "/api/autonomy/proposals"
+              ? "autonomy:propose"
+              : path === "/api/sports/refresh"
+                ? "sports:refresh"
+                : path === "/api/institute/outputs"
+                  ? "research:write"
+                  : path === "/api/icv/identities" ||
+                      path === "/api/icv/relationships"
+                    ? "identity:write"
+                    : path === "/api/twin/telemetry"
+                      ? "telemetry:write"
+                      : path === "/api/twin/relationships" ||
+                          /^\/api\/twin\/relationships\/[^/]+\/retire$/.test(
+                            path,
+                          )
+                        ? "relationships:write"
+                        : null;
           if (
             request.method === "POST" &&
             scope &&

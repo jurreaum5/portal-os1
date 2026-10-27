@@ -2,6 +2,13 @@ import { useGovernor } from "../layouts/GovernorLayout";
 import { NavLink, Link } from "react-router-dom";
 import { Icon } from "./Icon";
 const links = [
+  ["/portal/bemax", "spark", "BEMAX"],
+  ["/portal/identity", "portfolio", "Identity continuity"],
+  ["/portal/autonomy", "governance", "Operational autonomy"],
+  ["/portal/sports", "globe", "MAX Sports"],
+  ["/portal/institute", "departments", "MAX Institute"],
+  ["/portal/substrate", "forecasting", "Simulation and XR"],
+  ["/portal/models", "health", "Intelligence providers"],
   ["/portal/governor", "governance", "Governor console"],
   ["/portal/ecosystem", "globe", "MAX Universe"],
   ["/portal/intelligence", "spark", "Intelligence"],

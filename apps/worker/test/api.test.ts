@@ -1,3 +1,4 @@
+import { synchroniseIdentities } from "../src/universe-store";
 import {
   env,
   createExecutionContext,
@@ -680,6 +681,82 @@ describe("ICVS execution and recovery", () => {
         .bind(id)
         .first("n"),
     ).toBe(1);
+  });
+  it("honours a governed publishing time and resumes after approved compensation", async () => {
+    const { id, stub } = await start();
+    for (let i = 0; i < 9; i++) await drive(stub);
+    await synchroniseIdentities(bindings);
+    const post = (path: string, body: unknown) =>
+      get(path, {
+        method: "POST",
+        headers: { ...authorize, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const schedule = await post("/api/autonomy/proposals", {
+      entityId: `product:${id}`,
+      action: "publishing-schedule",
+      input: { notBefore: new Date(Date.now() + 3600000).toISOString() },
+      evidence: { facts: ["Release window policy"], sources: ["test-policy"] },
+    });
+    expect(schedule.status).toBe(201);
+    const p = (await schedule.json()) as { id: string };
+    expect((await post(`/api/autonomy/${p.id}/approve`, {})).status).toBe(200);
+    const approval = await bindings.DB.prepare(
+      "SELECT id FROM approvals WHERE product_id=? AND status='pending'",
+    )
+      .bind(id)
+      .first<{ id: string }>();
+    expect(
+      (await post(`/api/approvals/${approval!.id}/approve`, {})).status,
+    ).toBe(200);
+    await runInDurableObject(stub, async (instance: any, ctx) => {
+      instance.env.ICVS_PUBLISHER = {
+        fetch: async () => {
+          throw new Error("Must not publish before the approved time");
+        },
+      };
+      await instance.alarm();
+      expect((await ctx.storage.get<any>("workflow")).stage).toBe("Ready");
+      expect((await ctx.storage.get<any>("workflow")).message).toBe(
+        "Awaiting governed publishing schedule",
+      );
+      await ctx.storage.deleteAlarm();
+    });
+    const rollback = await post("/api/autonomy/proposals", {
+      entityId: `product:${id}`,
+      action: "rollback",
+      input: { proposalId: p.id },
+      evidence: {
+        facts: ["Release window withdrawn"],
+        sources: ["test-policy"],
+      },
+    });
+    expect(rollback.status).toBe(201);
+    const compensation = (await rollback.json()) as { id: string };
+    await post(`/api/autonomy/${compensation.id}/approve`, {});
+    await runInDurableObject(stub, async (instance: any, ctx) => {
+      let calls = 0;
+      instance.env.ICVS_PUBLISHER = {
+        fetch: async (_url: string, init: RequestInit) => {
+          calls++;
+          const input = JSON.parse(init.body as string);
+          return Response.json({
+            operationId: input.operationId,
+            packageDigest: input.packageDigest,
+            downloadReference: "scheduled-release",
+            receipt: "https://test.invalid/release",
+          });
+        },
+      };
+      await instance.alarm();
+      expect(calls).toBe(1);
+      await ctx.storage.deleteAlarm();
+    });
+    expect(
+      await bindings.DB.prepare("SELECT stage FROM products WHERE id=?")
+        .bind(id)
+        .first("stage"),
+    ).toBe("Published");
   });
   it("retains legacy workflow completion at Ready without automatic publication", async () => {
     const { id, stub } = await start();
