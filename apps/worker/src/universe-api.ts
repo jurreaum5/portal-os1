@@ -574,11 +574,14 @@ export async function universeApi(
           return json({ error: "XR scene not found" }, 404);
         if (
           scene === "quantum-xr-command-room" ||
+          scene === "institute-research-center" ||
           scene === "sports-intelligence-center"
         ) {
           const roots = g.nodes.filter(
             (n) =>
               n.scenes?.includes(scene) ||
+              (scene === "institute-research-center" &&
+                n.kind.startsWith("research-")) ||
               (scene === "sports-intelligence-center" &&
                 n.kind.startsWith("sports-")),
           );

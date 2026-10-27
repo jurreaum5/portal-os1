@@ -1,5 +1,7 @@
 export const operationalActions = [
   "resource-allocation",
+  "capacity-change",
+  "strategic-review",
   "work-assignment",
   "publishing-schedule",
   "risk-escalation",
@@ -17,6 +19,24 @@ export function operationalState(
   input: Record<string, unknown>,
 ): Record<string, unknown> {
   switch (action) {
+    case "strategic-review":
+      if (
+        !str(input.summary, 2000) ||
+        !str(input.reviewedAt) ||
+        !Number.isFinite(Date.parse(input.reviewedAt)) ||
+        Date.parse(input.reviewedAt) > Date.now()
+      )
+        throw new Error(
+          "A review summary and observed review time are required",
+        );
+      return {
+        ...current,
+        strategicReview: {
+          summary: input.summary,
+          reviewedAt: new Date(input.reviewedAt).toISOString(),
+        },
+      };
+    case "capacity-change":
     case "resource-allocation":
       if (
         !["department", "resource-pool"].includes(kind) ||

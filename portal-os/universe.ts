@@ -231,6 +231,7 @@ export const scenes = [
   "department-operations-center",
   "sports-intelligence-center",
   "quantum-xr-command-room",
+  "institute-research-center",
 ] as const;
 export function topology(
   nodes: GraphNode[],
@@ -280,7 +281,21 @@ export function spatialScene(
       units: "metres",
       layout: "deterministic illustrative layout; no physical-location claim",
     },
-    nodes: positions,
+    navigation: {
+      graph: "/api/twin/graph",
+      traversal: "/api/manifold/navigation",
+      path: "/api/manifold/path",
+      maxDepth: 8,
+    },
+    nodes: positions.map((n) => ({
+      ...n,
+      navigation: {
+        identityId: n.id,
+        neighbours: edges
+          .filter((e) => e.source === n.id || e.target === n.id)
+          .map((e) => (e.source === n.id ? e.target : e.source)),
+      },
+    })),
     edges,
   };
 }

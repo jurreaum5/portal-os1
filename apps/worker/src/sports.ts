@@ -6,6 +6,9 @@ import type { Env } from "./types";
 import { readObject } from "./customer-auth";
 import { registerIdentity, eventStatement, listRows } from "./universe-store";
 export const sportsCapabilities = [
+  "league",
+  "historical",
+  "forecast",
   "athlete",
   "team",
   "injury",
@@ -94,7 +97,9 @@ async function ingestSports(env: Env) {
       typeof r.observedAt !== "string" ||
       !Number.isFinite(Date.parse(r.observedAt)) ||
       Date.parse(r.observedAt) > Date.now() + 60000 ||
-      Date.parse(r.observedAt) < Date.now() - 7 * 86400000 ||
+      (r.category !== "historical" &&
+        Date.parse(r.observedAt) < Date.now() - 7 * 86400000) ||
+      Date.parse(r.observedAt) < Date.UTC(1900, 0, 1) ||
       !r.metrics ||
       typeof r.metrics !== "object" ||
       Array.isArray(r.metrics) ||

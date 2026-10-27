@@ -38,6 +38,18 @@ interface CompletionData {
   policy?: string;
   divisions?: Identity[];
   outputs?: Identity[];
+  lineage?: {
+    output_id: string;
+    predecessor_id: string | null;
+    version: number;
+  }[];
+  usage?: {
+    providerId: string;
+    day: string;
+    requests: number;
+    actualMicrousd: number | null;
+    reservedMicrousd: number;
+  }[];
   governance?: string;
   leagues?: string[];
   capabilities?: string[];
@@ -66,6 +78,8 @@ interface CompletionData {
     id: string;
     kind: string;
     model: string;
+    status: string;
+    capabilities: string[];
     health: string | { status: string; createdAt: string };
   }[];
   reservedMicrousd?: number;
@@ -359,6 +373,19 @@ export default function Completion({ area }: { area: string }) {
               </section>
               <section>
                 <h2>Research outputs</h2>
+                {data.lineage?.map((v) => (
+                  <p key={v.output_id}>
+                    <Link
+                      to={`/portal/identity?entityId=${encodeURIComponent(v.output_id)}`}
+                    >
+                      {v.output_id}
+                    </Link>{" "}
+                    · Version {v.version}
+                    {v.predecessor_id
+                      ? ` · Supersedes ${v.predecessor_id}`
+                      : ""}
+                  </p>
+                ))}
                 {data.outputs?.length ? (
                   <div className="universe-divisions">
                     {cards(data.outputs)}
@@ -381,6 +408,13 @@ export default function Completion({ area }: { area: string }) {
                   {data.dailyBudgetMicrousd} µUSD
                 </p>
                 <p>{data.method}</p>
+                {data.usage?.map((u) => (
+                  <p key={`${u.providerId}:${u.day}`}>
+                    {u.providerId} · {u.day} · {u.requests} requests ·{" "}
+                    {u.actualMicrousd ?? "Unknown"} µUSD observed ·{" "}
+                    {u.reservedMicrousd} µUSD reserved
+                  </p>
+                ))}
               </section>
               <section className="universe-divisions">
                 {data.providers.length ? (
@@ -388,7 +422,7 @@ export default function Completion({ area }: { area: string }) {
                     <article className="panel" key={p.id}>
                       <h2>{p.id}</h2>
                       <p>
-                        {p.kind} · {p.model}
+                        {p.kind} · {p.model} · {p.status}
                       </p>
                       <p>
                         {typeof p.health === "string"
@@ -425,7 +459,7 @@ export default function Completion({ area }: { area: string }) {
                 <p>
                   Ecosystem Galaxy · Product Constellation · Pipeline Universe ·
                   Department Operations Centre · Sports Intelligence Centre ·
-                  Quantum XR Command Room
+                  Institute Research Centre · Quantum XR Command Room
                 </p>
                 <Link to="/portal/twin">Navigate live relationships ↗</Link>
               </section>

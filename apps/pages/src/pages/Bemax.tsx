@@ -15,6 +15,11 @@ interface Brief {
     sources: string[];
     confidence: string;
     tradeoffs: string[];
+    impactScope: { divisionId: string; affectedEntities: string[] };
+    dependencyAnalysis: {
+      prerequisites: { id: string }[];
+      affectedConsumers: { id: string }[];
+    };
     navigateTo: string;
   }[];
   navigation: { id: string; label: string; kind: string; navigateTo: string }[];
@@ -73,7 +78,7 @@ export default function Bemax() {
     <>
       <div className="page-heading">
         <div>
-          <div className="eyebrow">PERSONAL AI OPERATING SYSTEM</div>
+          <div className="eyebrow">STRATEGIC AI OPERATING SYSTEM</div>
           <h1>
             BEMAX<span className="title-dot">.</span>
           </h1>
@@ -163,6 +168,24 @@ export default function Bemax() {
                         </div>
                       ))}
                     </dl>
+                    <h3>Impact and dependencies</h3>
+                    <p>Division: {r.impactScope.divisionId}</p>
+                    <p>
+                      Affected consumers:{" "}
+                      {r.impactScope.affectedEntities.join(", ") ||
+                        "None recorded"}
+                    </p>
+                    <p>
+                      Prerequisites:{" "}
+                      {r.dependencyAnalysis.prerequisites
+                        .map((p) => p.id)
+                        .join(", ") || "None recorded"}
+                    </p>
+                    <Link
+                      to={`/portal/manifold?root=${encodeURIComponent(r.entityId)}`}
+                    >
+                      Explore dependency exposure ↗
+                    </Link>
                     <h3>Tradeoffs</h3>
                     <ul>
                       {r.tradeoffs.map((t) => (

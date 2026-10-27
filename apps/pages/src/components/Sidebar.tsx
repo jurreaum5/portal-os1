@@ -3,6 +3,10 @@ import { NavLink, Link } from "react-router-dom";
 import { Icon } from "./Icon";
 const links = [
   ["/portal/bemax", "spark", "BEMAX"],
+  ["/portal/operations", "health", "Production operations"],
+  ["/portal/manifold", "globe", "Manifold navigation"],
+  ["/portal/reports", "analytics", "Sports reports"],
+  ["/portal/registry", "forecasting", "Simulation registry"],
   ["/portal/identity", "portfolio", "Identity continuity"],
   ["/portal/autonomy", "governance", "Operational autonomy"],
   ["/portal/sports", "globe", "MAX Sports"],

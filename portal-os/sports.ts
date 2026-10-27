@@ -27,6 +27,11 @@ export function analyseSports(
     );
     return {
       ...current,
+      freshnessState:
+        Date.parse(current.observedAt) < now - 86400000 ? "STALE" : "CONNECTED",
+      evidenceLinks: [current.source],
+      confidence:
+        "Attributed provider observation; accuracy has not been independently verified",
       previousObservedAt: previous?.observedAt ?? null,
       changes,
       stale: Date.parse(current.observedAt) < now - 86400000,

@@ -79,3 +79,5 @@ XR readiness and portable model routing](docs/09_MAX_UNIVERSE_COMPLETION.md).
 Apply additive migration 0008 before upgrading. BEMAX is the new Portal home;
 existing Governor and ecosystem URLs remain available. Live production intelligence
 requires configured provider adapters and verified external evidence.
+
+Phase 4 integration contracts and deployment recovery plan: [Production operations](docs/10_PRODUCTION_OPERATIONS.md).

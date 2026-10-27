@@ -1,3 +1,4 @@
+import { connectionStatus } from "../../../portal-os/production";
 import type { Env } from "./types";
 import { readObject } from "./customer-auth";
 export interface ModelProvider {
@@ -169,7 +170,11 @@ async function callProvider(
   return { text, input: Number(input), output: Number(output) };
 }
 /** Reserve budget atomically before every attempt. Failed/unknown charges retain their reservation. */
-export async function routeModel(env: Env, prompt: string) {
+export async function routeModel(
+  env: Env,
+  prompt: string,
+  providerId?: string,
+) {
   const config = modelConfig(env),
     day = new Date().toISOString().slice(0, 10);
   const credentials = JSON.parse(env.MODEL_CREDENTIALS ?? "{}") as Record<
@@ -177,7 +182,9 @@ export async function routeModel(env: Env, prompt: string) {
     string
   >;
   const failures: { providerId: string; reason: string }[] = [];
-  for (const p of config.providers) {
+  for (const p of config.providers.filter(
+    (p) => !providerId || p.id === providerId,
+  )) {
     const bytes = new TextEncoder().encode(prompt).length;
     if (bytes > p.maxInputBytes) {
       failures.push({
@@ -260,8 +267,9 @@ export async function routeModel(env: Env, prompt: string) {
 }
 export async function modelHealth(env: Env) {
   const config = modelConfig(env);
+  const credentials = JSON.parse(env.MODEL_CREDENTIALS ?? "{}");
   const results = await env.DB.prepare(
-    "SELECT provider_id AS providerId,status,latency_ms AS latencyMs,created_at AS createdAt FROM model_attempts ORDER BY rowid DESC LIMIT 100",
+    "SELECT provider_id AS providerId,status,latency_ms AS latencyMs,created_at AS createdAt FROM model_attempts m WHERE m.rowid=(SELECT MAX(n.rowid) FROM model_attempts n WHERE n.provider_id=m.provider_id) ORDER BY rowid DESC LIMIT 100",
   ).all();
   const spent = await env.DB.prepare(
     "SELECT COALESCE(SUM(reserved_microusd),0) AS reserved FROM model_attempts WHERE day=?",
@@ -273,10 +281,29 @@ export async function modelHealth(env: Env) {
       id: p.id,
       kind: p.kind,
       model: p.model,
+      capabilities: ["text-generation"],
+      limits: {
+        maxInputBytes: p.maxInputBytes,
+        maxOutputTokens: p.maxOutputTokens,
+      },
+      credentialConfigured: p.kind === "local" || !!credentials[p.id],
+      status: connectionStatus(
+        true,
+        p.kind === "local" || !!credentials[p.id],
+        results.results.find((r) => r.providerId === p.id)?.status as
+          string | undefined,
+        results.results.find((r) => r.providerId === p.id)?.createdAt as
+          string | undefined,
+      ),
       health:
         results.results.find((r) => r.providerId === p.id) ??
         "No request samples",
     })),
+    usage: (
+      await env.DB.prepare(
+        "SELECT provider_id AS providerId,day,COUNT(*) AS requests,SUM(actual_microusd) AS actualMicrousd,SUM(reserved_microusd) AS reservedMicrousd FROM model_attempts GROUP BY provider_id,day ORDER BY day DESC LIMIT 200",
+      ).all()
+    ).results,
     attempts: results.results,
     reservedMicrousd: spent,
     dailyBudgetMicrousd: config.dailyBudgetMicrousd,

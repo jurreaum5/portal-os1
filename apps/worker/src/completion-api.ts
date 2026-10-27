@@ -1,3 +1,5 @@
+import { productionRead } from "./production-api";
+import { manifoldView } from "../../../portal-os/manifold";
 import { copyJson } from "../../../max-core/state/value";
 import type { Env } from "./types";
 import { protectPortal } from "./access";
@@ -20,7 +22,7 @@ import {
   eventStatement,
   listRows,
 } from "./universe-store";
-import { modelHealth, routeModel } from "./model-router";
+import { modelConfig, modelHealth, routeModel } from "./model-router";
 import { refreshSports, sportsOverview } from "./sports";
 class InputError extends Error {
   constructor(
@@ -78,6 +80,43 @@ export async function applyOperationalProposals(env: Env) {
     "SELECT * FROM autonomy_proposals WHERE status IN ('approved','overridden') ORDER BY created_at,id LIMIT 50",
   );
   for (const p of proposals) {
+    const entity = await identity(env, p.entity_id);
+    let reason =
+      "Evidence, approval history, matching revision and compensation storage validated";
+    let passed = true;
+    try {
+      evidence(JSON.parse(p.evidence));
+      if (!entity || entity.revision !== p.expected_revision)
+        throw new Error("Identity revision changed");
+      const decision = await env.DB.prepare(
+        "SELECT decided_by FROM autonomy_proposals WHERE id=?",
+      )
+        .bind(p.id)
+        .first<{ decided_by: string }>();
+      if (!decision?.decided_by) throw new Error("Approval history missing");
+      const state = JSON.parse(p.payload);
+      if (
+        p.action === "publishing-schedule" &&
+        Date.parse(state.publishingNotBefore) <= Date.now()
+      )
+        throw new Error("Publishing schedule expired; submit a new proposal");
+    } catch (e) {
+      passed = false;
+      reason = e instanceof Error ? e.message : "Policy validation failed";
+    }
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO policy_checks(proposal_id,policy_version,result,reason) VALUES (?,'1',?,?)",
+    )
+      .bind(p.id, passed ? "passed" : "blocked", reason)
+      .run();
+    if (!passed) {
+      await env.DB.prepare(
+        "UPDATE autonomy_proposals SET status='conflict' WHERE id=? AND status IN ('approved','overridden')",
+      )
+        .bind(p.id)
+        .run();
+      continue;
+    }
     // Revision check is also enforced by the transactional trigger.
     const result = await env.DB.prepare(
       "UPDATE autonomy_proposals SET status='applied' WHERE id=? AND status IN ('approved','overridden') AND expected_revision=(SELECT revision FROM universe_identities WHERE id=entity_id)",
@@ -169,6 +208,8 @@ export async function completionApi(
       "/api/substrate",
       "/api/models",
       "/api/manifold",
+      "/api/operations/status",
+      "/api/operations/audit",
     ].some((p) => path === p || path.startsWith(p + "/"))
   )
     return null;
@@ -176,9 +217,11 @@ export async function completionApi(
   if (actor instanceof Response) return actor;
   try {
     if (request.method === "GET") {
+      const production = await productionRead(url, env);
+      if (production) return production;
       if (path === "/api/bemax") {
         const question = text(
-          url.searchParams.get("question") ?? bemaxQuestions[2],
+          url.searchParams.get("question") ?? "What should I do next?",
           1000,
         );
         const q = url.searchParams.get("search") ?? "";
@@ -186,8 +229,13 @@ export async function completionApi(
           throw new InputError("Search exceeds 200 characters");
         const g = await graph(env);
         const query = q.toLowerCase();
+        const lastReview = await env.DB.prepare(
+          "SELECT created_at FROM bemax_memory WHERE owner_id=? AND kind='executive-brief' ORDER BY created_at DESC LIMIT 1",
+        )
+          .bind(actor.id)
+          .first<{ created_at: string }>();
         return json({
-          ...briefUniverse(await readUniverse(env), question),
+          ...briefUniverse(await readUniverse(env), question, await graph(env)),
           questions: bemaxQuestions,
           navigation: g.nodes
             .filter(
@@ -206,9 +254,13 @@ export async function completionApi(
             "SELECT * FROM bemax_memory WHERE owner_id=? AND NOT EXISTS (SELECT 1 FROM bemax_memory n WHERE n.supersedes=bemax_memory.id) ORDER BY created_at DESC,id DESC LIMIT 100",
             actor.id,
           ),
+          lastReviewAt: lastReview?.created_at ?? null,
           changes: await listRows(
             env,
-            "SELECT * FROM universe_events ORDER BY sequence DESC LIMIT 100",
+            "SELECT * FROM universe_events WHERE created_at>=? ORDER BY sequence DESC LIMIT 100",
+            question.toLowerCase().includes("since")
+              ? (lastReview?.created_at ?? "")
+              : "",
           ),
           limitation:
             "Deterministic evidence-based operations brief. Optional model summaries cannot approve or execute actions.",
@@ -258,6 +310,10 @@ export async function completionApi(
             env,
             "SELECT * FROM autonomy_effects ORDER BY applied_revision DESC LIMIT 200",
           ),
+          policyChecks: await listRows(
+            env,
+            "SELECT * FROM policy_checks ORDER BY checked_at DESC LIMIT 200",
+          ),
           lifecycleApprovals: "/api/approvals",
           configuredRules: configuredRules(env.AUTONOMY_RULES).map((r) => ({
             id: r.id,
@@ -278,6 +334,14 @@ export async function completionApi(
             env,
             "SELECT * FROM universe_identities WHERE kind='research-output' ORDER BY label LIMIT 200",
           ),
+          lineage: await listRows(
+            env,
+            "SELECT * FROM research_versions ORDER BY created_at DESC LIMIT 500",
+          ),
+          governanceRecords: await listRows(
+            env,
+            "SELECT p.* FROM autonomy_proposals p JOIN universe_identities i ON i.id=p.entity_id WHERE i.kind='research-output' ORDER BY p.created_at DESC LIMIT 200",
+          ),
           outputTypes: [
             "whitepaper",
             "course",
@@ -289,6 +353,13 @@ export async function completionApi(
             "Draft → reviewed → released; each transition requires an evidence-backed Governor decision. Withdrawal preserves identity and history.",
         });
       if (path === "/api/models") return json(await modelHealth(env));
+      if (path === "/api/substrate/registry")
+        return json({
+          models: await listRows(
+            env,
+            "SELECT * FROM simulation_registry ORDER BY id LIMIT 200",
+          ),
+        });
       if (path === "/api/substrate")
         return json({
           schemaVersion: 1,
@@ -300,6 +371,10 @@ export async function completionApi(
             "emergence",
             "geometry",
           ],
+          registry: await listRows(
+            env,
+            "SELECT * FROM simulation_registry ORDER BY id LIMIT 200",
+          ),
           engine: "MAX-CORE Simulation",
           domains: [
             "products",
@@ -334,6 +409,58 @@ export async function completionApi(
           input: JSON.parse(run.input),
           output: JSON.parse(run.output),
         });
+      }
+      if (
+        [
+          "/api/manifold",
+          "/api/manifold/navigation",
+          "/api/manifold/influence",
+          "/api/manifold/opportunities",
+          "/api/manifold/risk",
+          "/api/manifold/dependencies",
+        ].includes(path)
+      ) {
+        const g = await graph(env);
+        if (
+          path === "/api/manifold/opportunities" ||
+          path === "/api/manifold/risk"
+        )
+          return json(
+            briefUniverse(
+              await readUniverse(env),
+              path.endsWith("risk")
+                ? "What creates the largest ecosystem risk?"
+                : "What represents the highest opportunity?",
+              g,
+            ),
+          );
+        const root = url.searchParams.get("root") ?? "ecosystem:max";
+        if (!g.nodes.some((n) => n.id === root))
+          throw new InputError("Graph root not found", 404);
+        const direction = path.endsWith("influence")
+          ? "incoming"
+          : path.endsWith("dependencies")
+            ? "outgoing"
+            : (url.searchParams.get("direction") ?? "both");
+        const depth = Number(url.searchParams.get("depth") ?? 8);
+        if (
+          !["incoming", "outgoing", "both"].includes(direction) ||
+          !Number.isInteger(depth) ||
+          depth < 0 ||
+          depth > 8
+        )
+          throw new InputError("Invalid direction or depth (0–8)");
+        return json(
+          manifoldView(
+            g,
+            root,
+            direction as "incoming" | "outgoing" | "both",
+            path.endsWith("dependencies") || path.endsWith("influence")
+              ? "depends_on"
+              : (url.searchParams.get("relation") ?? undefined),
+            depth,
+          ),
+        );
       }
       if (path === "/api/manifold/path") {
         const from = text(url.searchParams.get("from")),
@@ -402,9 +529,10 @@ export async function completionApi(
           "ecosystem",
           "research-output",
           "simulation-run",
+          "simulation-model",
         ].includes(kind) ||
         kind.startsWith("sports-") ||
-        /^(product|division|department|project|approval|pipeline|ecosystem|sports|simulation|research-output):/.test(
+        /^(product|division|department|project|approval|pipeline|ecosystem|sports|simulation|simulation-model|research-output):/.test(
           id,
         )
       )
@@ -478,9 +606,29 @@ export async function completionApi(
       ]);
       return json({ id }, 201);
     }
+    if (path === "/api/models/check") {
+      const providerId = text(b.providerId, 60);
+      if (!modelConfig(env).providers.some((p) => p.id === providerId))
+        throw new InputError("Provider not configured", 404);
+      const result = await routeModel(
+        env,
+        "Reply with OK to verify text generation availability.",
+        providerId,
+      );
+      return json({
+        providerId,
+        observedAt: new Date().toISOString(),
+        status: "blocked" in result ? "UNAVAILABLE" : "CONNECTED",
+        health: await modelHealth(env),
+      });
+    }
     if (path === "/api/bemax/reason") {
       const question = text(b.question, 1000),
-        brief = briefUniverse(await readUniverse(env), question);
+        brief = briefUniverse(
+          await readUniverse(env),
+          question,
+          await graph(env),
+        );
       const memories = await listRows(
         env,
         "SELECT entity_id,content,source FROM bemax_memory WHERE owner_id=? AND NOT EXISTS (SELECT 1 FROM bemax_memory n WHERE n.supersedes=bemax_memory.id) ORDER BY created_at DESC LIMIT 20",
@@ -635,27 +783,118 @@ export async function completionApi(
         throw new InputError(
           "Research output requires an HTTPS evidence location",
         );
-      const record = await registerIdentity(
-        env,
-        {
-          id,
-          kind: "research-output",
-          label: text(b.title),
-          invariants: { origin: division.id, key: id, type },
-          state: { status: "draft", type, source },
-        },
-        actor.id,
-        source,
-      );
+      let predecessor: string | null = null,
+        version = 1;
+      if (b.predecessorId !== undefined) {
+        const previous = await requiredIdentity(env, b.predecessorId);
+        const origin = JSON.parse(previous.invariants);
+        if (
+          previous.kind !== "research-output" ||
+          origin.origin !== division.id ||
+          origin.type !== type
+        )
+          throw new InputError(
+            "Predecessor must have the same research division and output type",
+          );
+        const prior = await env.DB.prepare(
+          "SELECT version FROM research_versions WHERE output_id=? AND NOT EXISTS(SELECT 1 FROM research_versions WHERE predecessor_id=?)",
+        )
+          .bind(previous.id, previous.id)
+          .first<{ version: number }>();
+        if (!prior)
+          throw new InputError("Predecessor has already been superseded", 409);
+        predecessor = previous.id;
+        version = prior.version + 1;
+      }
+      const title = text(b.title);
       await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO universe_identities(id,kind,label,invariants,state) VALUES (?,'research-output',?,?,?)",
+        ).bind(
+          id,
+          title,
+          JSON.stringify({ origin: division.id, key: id, type }),
+          JSON.stringify({ status: "draft", type, source }),
+        ),
+        env.DB.prepare(
+          "INSERT INTO research_versions(output_id,predecessor_id,version) VALUES (?,?,?)",
+        ).bind(id, predecessor, version),
+        ...(predecessor
+          ? [
+              env.DB.prepare(
+                "INSERT INTO identity_relationships(id,source_id,target_id,relation,evidence) VALUES (?,?,?,'supersedes',?)",
+              ).bind(`lineage:${id}`, id, predecessor, JSON.stringify(proof)),
+            ]
+          : []),
         env.DB.prepare(
           "INSERT INTO identity_relationships(id,source_id,target_id,relation,evidence) VALUES (?,?,?,'produces',?)",
         ).bind(`research:${id}`, division.id, id, JSON.stringify(proof)),
+        eventStatement(env, id, "identity.registered", actor.id, source, {
+          origin: division.id,
+          key: id,
+          type,
+        }),
         eventStatement(env, id, "research.submitted", actor.id, source, proof),
       ]);
-      return json(record, 201);
+      return json(await identity(env, id), 201);
+    }
+    if (path === "/api/substrate/registry") {
+      const id = text(b.id),
+        version = text(b.version, 80),
+        modelClass = text(b.modelClass, 40),
+        source = text(b.source, 1000),
+        assumptions = text(b.assumptions, 4000);
+      if (!["scenario", "forecast", "operational"].includes(modelClass))
+        throw new InputError("Invalid model class");
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO universe_identities(id,kind,label,invariants) VALUES (?,'simulation-model',?,?)",
+        ).bind(
+          `simulation-model:${id}`,
+          id,
+          JSON.stringify({ origin: "substrate", key: id, modelClass, version }),
+        ),
+        env.DB.prepare(
+          "INSERT INTO identity_relationships(id,source_id,target_id,relation,evidence) VALUES (?,'ecosystem:max',?,'registers',?)",
+        ).bind(
+          `registry:${id}`,
+          `simulation-model:${id}`,
+          JSON.stringify({ source, version }),
+        ),
+        env.DB.prepare(
+          "INSERT INTO simulation_registry(id,version,model_class,engine,source,assumptions,actor) VALUES (?,?,?,?,?,?,?)",
+        ).bind(
+          id,
+          version,
+          modelClass,
+          "MAX-CORE Simulation",
+          source,
+          assumptions,
+          actor.id,
+        ),
+        eventStatement(
+          env,
+          "ecosystem:max",
+          "simulation.registered",
+          actor.id,
+          source,
+          { id, version, modelClass, assumptions },
+        ),
+      ]);
+      return json({ id, version, modelClass }, 201);
     }
     if (path === "/api/substrate/scenarios") {
+      const modelId =
+        b.modelId === undefined ? "max-core:scenario-v1" : text(b.modelId);
+      const model = await env.DB.prepare(
+        "SELECT * FROM simulation_registry WHERE id=?",
+      )
+        .bind(modelId)
+        .first<{ model_class: string }>();
+      if (!model || model.model_class !== "scenario")
+        throw new InputError(
+          "A registered scenario model is required; forecast and operational models require their own validated executor",
+        );
       const scenario = validateScenario(b);
       for (const entity of scenario.entities) {
         const actual = await requiredIdentity(env, entity.id);
@@ -676,8 +915,22 @@ export async function completionApi(
           JSON.stringify({ origin: "Unified Simulation Substrate", key: id }),
         ),
         env.DB.prepare(
-          "INSERT INTO simulation_runs(id,actor,input,output) VALUES (?,?,?,?)",
-        ).bind(id, actor.id, JSON.stringify(scenario), JSON.stringify(result)),
+          "INSERT INTO simulation_runs(id,actor,input,output,model_id) VALUES (?,?,?,?,?)",
+        ).bind(
+          id,
+          actor.id,
+          JSON.stringify(scenario),
+          JSON.stringify(result),
+          modelId,
+        ),
+        env.DB.prepare(
+          "INSERT INTO identity_relationships(id,source_id,target_id,relation,evidence) VALUES (?,?,?,'uses-model',?)",
+        ).bind(
+          `model-run:${id}`,
+          `simulation:${id}`,
+          `simulation-model:${modelId}`,
+          JSON.stringify({ modelId }),
+        ),
         eventStatement(
           env,
           `simulation:${id}`,
