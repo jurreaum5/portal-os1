@@ -1,5 +1,10 @@
 export type ConnectionStatus =
-  "CONNECTED" | "DISCONNECTED" | "BLOCKED" | "UNAVAILABLE" | "STALE";
+  | "CONNECTED"
+  | "DEGRADED"
+  | "DISCONNECTED"
+  | "BLOCKED"
+  | "UNAVAILABLE"
+  | "STALE";
 export function connectionStatus(
   configured: boolean,
   credential: boolean,
@@ -20,6 +25,7 @@ export function connectionStatus(
   )
     return "STALE";
   if (outcome === "blocked") return "BLOCKED";
+  if (outcome === "failed") return "DISCONNECTED";
   return outcome === "succeeded" || outcome === "observed"
     ? "CONNECTED"
     : "UNAVAILABLE";

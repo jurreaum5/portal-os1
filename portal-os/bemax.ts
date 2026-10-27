@@ -1,6 +1,10 @@
 import { dependencyAnalysis, type ManifoldGraph } from "./manifold";
 import type { Universe } from "./universe";
 export const bemaxQuestions = [
+  "What should I focus on?",
+  "What is my highest-value opportunity?",
+  "What is my highest-risk exposure?",
+  "What should be published next?",
   "What should I focus on this quarter?",
   "What has the highest long-term impact?",
   "What creates the largest ecosystem risk?",
@@ -36,6 +40,7 @@ export function briefUniverse(
         )
       : query.includes("fund") ||
           query.includes("quarter") ||
+          query.includes("focus") ||
           query.includes("impact")
         ? u.products.filter((p) => p.stage !== "Archived")
         : query.includes("publish")
@@ -77,6 +82,7 @@ export function briefUniverse(
             .affectedConsumers.map((v) => v.id),
         },
         dependencyAnalysis: analyses.get(p.id)!,
+        relatedDependencies: analyses.get(p.id)!.prerequisites,
         evidence: {
           stage: p.stage,
           score: p.score,
@@ -111,6 +117,10 @@ export function briefUniverse(
       method:
         "Directed depends_on reachability up to eight hops; no inferred links",
     },
+    relatedDependencies: [...analyses].map(([id, analysis]) => ({
+      entityId: `product:${id}`,
+      ...analysis,
+    })),
     ecosystemHealth: u.summary.ecosystemHealth,
     growthAnalysis: {
       observedGrowthPct: u.summary.observedGrowthPct,
@@ -122,5 +132,50 @@ export function briefUniverse(
     rankingMethod:
       "Quarter, impact and funding focus: affected consumers then lifecycle completeness. Other focus: observed risk first. No predicted ROI.",
     methods: u.methods,
+  };
+}
+
+export function strategicPlan(
+  u: Universe,
+  g: ManifoldGraph,
+  horizonMonths: number,
+) {
+  const brief = briefUniverse(u, "What should I focus on this quarter?", g);
+  return {
+    horizonMonths,
+    mode: "Conditional operational plan; not a revenue prediction or execution instruction",
+    milestones: brief.recommendations.map((r, index) => ({
+      priority: index + 1,
+      entityId: r.entityId,
+      action: r.action,
+      prerequisites: r.relatedDependencies,
+      affectedDivisions: [
+        ...new Set(
+          g.nodes
+            .filter((n) => r.impactScope.affectedEntities.includes(n.id))
+            .map((n) => n.divisionId)
+            .filter(Boolean),
+        ),
+      ],
+      gates: [
+        "Refresh source evidence",
+        "Resolve recorded dependencies",
+        "Obtain Governor approval through existing policy",
+      ],
+      evidence: r.evidence,
+      sources: r.sources,
+      confidence: r.confidence,
+      tradeoffs: r.tradeoffs,
+      impactScope: r.impactScope,
+    })),
+    reassessWhen: [
+      "A dependency changes",
+      "A source becomes stale",
+      "A Governor decision changes capacity or lifecycle",
+    ],
+    assumptions: [
+      "Current graph relationships persist until reviewed",
+      "No future growth rate or resource availability is inferred",
+    ],
   };
 }

@@ -55,15 +55,21 @@ createRoot(document.getElementById("root")!).render(
         <Routes>
           <Route element={<MainLayout />}>
             <Route index element={<RoleHome />} />
-            {(["operations", "manifold", "reports", "registry"] as const).map(
-              (area) => (
-                <Route
-                  key={area}
-                  path={`portal/${area}`}
-                  element={<Production key={area} area={area} />}
-                />
-              ),
-            )}
+            {(
+              [
+                "operations",
+                "manifold",
+                "reports",
+                "registry",
+                "lineage",
+              ] as const
+            ).map((area) => (
+              <Route
+                key={area}
+                path={`portal/${area}`}
+                element={<Production key={area} area={area} />}
+              />
+            ))}
             <Route path="portal/bemax" element={<Bemax />} />
             {[
               "identity",

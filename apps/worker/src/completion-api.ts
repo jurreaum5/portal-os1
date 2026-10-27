@@ -1,11 +1,20 @@
 import { productionRead } from "./production-api";
-import { manifoldView } from "../../../portal-os/manifold";
+import { simulationEvidence, replayEvidence } from "./simulation-evidence";
+import {
+  manifoldView,
+  ecosystemSearch,
+  riskPropagation,
+} from "../../../portal-os/manifold";
 import { copyJson } from "../../../max-core/state/value";
 import type { Env } from "./types";
 import { protectPortal } from "./access";
 import { readObject } from "./customer-auth";
 import { readUniverse, graph } from "./universe-api";
-import { briefUniverse, bemaxQuestions } from "../../../portal-os/bemax";
+import {
+  briefUniverse,
+  bemaxQuestions,
+  strategicPlan,
+} from "../../../portal-os/bemax";
 import {
   simulateScenario,
   validateScenario,
@@ -210,6 +219,7 @@ export async function completionApi(
       "/api/manifold",
       "/api/operations/status",
       "/api/operations/audit",
+      "/api/operations/recovery",
     ].some((p) => path === p || path.startsWith(p + "/"))
   )
     return null;
@@ -227,7 +237,11 @@ export async function completionApi(
         const q = url.searchParams.get("search") ?? "";
         if (q.length > 200)
           throw new InputError("Search exceeds 200 characters");
-        const g = await graph(env);
+        const g = await graph(env),
+          universe = await readUniverse(env);
+        const horizon = Number(url.searchParams.get("horizonMonths") ?? 12);
+        if (!Number.isInteger(horizon) || horizon < 1 || horizon > 60)
+          throw new InputError("horizonMonths must be 1–60");
         const query = q.toLowerCase();
         const lastReview = await env.DB.prepare(
           "SELECT created_at FROM bemax_memory WHERE owner_id=? AND kind='executive-brief' ORDER BY created_at DESC LIMIT 1",
@@ -235,7 +249,8 @@ export async function completionApi(
           .bind(actor.id)
           .first<{ created_at: string }>();
         return json({
-          ...briefUniverse(await readUniverse(env), question, await graph(env)),
+          ...briefUniverse(universe, question, g),
+          plan: strategicPlan(universe, g, horizon),
           questions: bemaxQuestions,
           navigation: g.nodes
             .filter(
@@ -324,6 +339,40 @@ export async function completionApi(
             "Promotions and archives retain existing factory approvals, evidence and compensation. Operational proposals require Governor decisions and matching identity revisions.",
         });
       if (path === "/api/sports") return json(await sportsOverview(env));
+      if (path === "/api/institute/lineage") {
+        const entity = await requiredIdentity(
+          env,
+          url.searchParams.get("entityId"),
+        );
+        if (entity.kind !== "research-output")
+          throw new InputError("Research output required");
+        const g = await graph(env),
+          nodes = g.nodes.filter((n) => n.kind === "research-output"),
+          ids = new Set(nodes.map((n) => n.id));
+        const edges = g.edges.filter(
+          (e) =>
+            ids.has(e.source) &&
+            ids.has(e.target) &&
+            ["derives_from", "supersedes", "depends_on"].includes(e.relation),
+        );
+        const lineage = manifoldView({ nodes, edges }, entity.id, "outgoing");
+        const included = new Set(lineage.nodes.map((n) => n.id));
+        return json({
+          ...lineage,
+          versions: (
+            await listRows<{ output_id: string }>(
+              env,
+              "SELECT * FROM research_versions ORDER BY created_at DESC LIMIT 500",
+            )
+          ).filter((v) => included.has(v.output_id)),
+          publicationHistory: await listRows(
+            env,
+            "SELECT * FROM universe_events WHERE entity_id=? AND type='autonomy.research-output' ORDER BY sequence DESC LIMIT 200",
+            entity.id,
+          ),
+          source: JSON.parse(entity.state).source,
+        });
+      }
       if (path === "/api/institute")
         return json({
           divisions: await listRows(
@@ -348,6 +397,7 @@ export async function completionApi(
             "framework",
             "standard",
             "research-report",
+            "publication",
           ],
           governance:
             "Draft → reviewed → released; each transition requires an evidence-backed Governor decision. Withdrawal preserves identity and history.",
@@ -355,9 +405,13 @@ export async function completionApi(
       if (path === "/api/models") return json(await modelHealth(env));
       if (path === "/api/substrate/registry")
         return json({
+          runs: await listRows(
+            env,
+            "SELECT id,actor,model_id,created_at FROM simulation_runs ORDER BY created_at DESC LIMIT 100",
+          ),
           models: await listRows(
             env,
-            "SELECT * FROM simulation_registry ORDER BY id LIMIT 200",
+            "SELECT r.*,p.owner_id,p.domain,p.predecessor_id,p.evidence FROM simulation_registry r JOIN simulation_provenance p ON p.model_id=r.id ORDER BY r.id LIMIT 200",
           ),
         });
       if (path === "/api/substrate")
@@ -373,7 +427,7 @@ export async function completionApi(
           ],
           registry: await listRows(
             env,
-            "SELECT * FROM simulation_registry ORDER BY id LIMIT 200",
+            "SELECT r.*,p.owner_id,p.domain,p.predecessor_id,p.evidence FROM simulation_registry r JOIN simulation_provenance p ON p.model_id=r.id ORDER BY r.id LIMIT 200",
           ),
           engine: "MAX-CORE Simulation",
           domains: [
@@ -408,6 +462,15 @@ export async function completionApi(
           ...run,
           input: JSON.parse(run.input),
           output: JSON.parse(run.output),
+          reproducibility: await simulationEvidence(
+            JSON.parse(run.input),
+            JSON.parse(run.output),
+          ),
+          replays: await listRows(
+            env,
+            "SELECT * FROM simulation_replays WHERE run_id=? ORDER BY created_at DESC LIMIT 100",
+            run.id,
+          ),
         });
       }
       if (
@@ -416,24 +479,47 @@ export async function completionApi(
           "/api/manifold/navigation",
           "/api/manifold/influence",
           "/api/manifold/opportunities",
+          "/api/manifold/opportunity",
           "/api/manifold/risk",
           "/api/manifold/dependencies",
         ].includes(path)
       ) {
         const g = await graph(env);
+        const query = url.searchParams.get("q");
+        if (query !== null) {
+          if (query.length > 200)
+            throw new InputError("Search exceeds 200 characters");
+          return json(ecosystemSearch(g, query));
+        }
         if (
+          path === "/api/manifold/opportunity" ||
           path === "/api/manifold/opportunities" ||
           path === "/api/manifold/risk"
-        )
-          return json(
-            briefUniverse(
-              await readUniverse(env),
+        ) {
+          const universe = await readUniverse(env);
+          return json({
+            ...briefUniverse(
+              universe,
               path.endsWith("risk")
                 ? "What creates the largest ecosystem risk?"
                 : "What represents the highest opportunity?",
               g,
             ),
-          );
+            propagation: path.endsWith("risk")
+              ? riskPropagation(
+                  g,
+                  universe.products
+                    .filter((p) => p.risk > 0)
+                    .map((p) => ({
+                      entityId: `product:${p.id}`,
+                      reasons: p.risks,
+                    })),
+                )
+              : [],
+            nodes: g.nodes,
+            edges: g.edges,
+          });
+        }
         const root = url.searchParams.get("root") ?? "ecosystem:max";
         if (!g.nodes.some((n) => n.id === root))
           throw new InputError("Graph root not found", 404);
@@ -498,6 +584,15 @@ export async function completionApi(
         return json({
           path: pathIds,
           nodes: g.nodes.filter((n) => pathIds.includes(n.id)),
+          edges: pathIds
+            .slice(1)
+            .map((id, i) =>
+              g.edges.find(
+                (e) =>
+                  (e.source === pathIds[i] && e.target === id) ||
+                  (e.target === pathIds[i] && e.source === id),
+              ),
+            ),
           method:
             "Shortest undirected relationship path in the current live graph; edges retain direction metadata",
         });
@@ -615,11 +710,20 @@ export async function completionApi(
         "Reply with OK to verify text generation availability.",
         providerId,
       );
+      const health = await modelHealth(env);
+      const observed = health.providers.find(
+        (p) => p.id === providerId,
+      )!.status;
       return json({
         providerId,
         observedAt: new Date().toISOString(),
-        status: "blocked" in result ? "UNAVAILABLE" : "CONNECTED",
-        health: await modelHealth(env),
+        status:
+          "blocked" in result &&
+          !["DISCONNECTED", "STALE", "BLOCKED"].includes(observed)
+            ? "BLOCKED"
+            : observed,
+        completed: !("blocked" in result),
+        health,
       });
     }
     if (path === "/api/bemax/reason") {
@@ -767,6 +871,7 @@ export async function completionApi(
           "framework",
           "standard",
           "research-report",
+          "publication",
         ].includes(type)
       )
         throw new InputError(
@@ -806,6 +911,22 @@ export async function completionApi(
         predecessor = previous.id;
         version = prior.version + 1;
       }
+      const derivesFrom = b.derivesFrom === undefined ? [] : b.derivesFrom;
+      if (
+        !Array.isArray(derivesFrom) ||
+        derivesFrom.length > 20 ||
+        new Set(derivesFrom).size !== derivesFrom.length
+      )
+        throw new InputError(
+          "At most 20 distinct research sources are permitted",
+        );
+      const sourceIds: string[] = [];
+      for (const sourceId of derivesFrom) {
+        const parent = await requiredIdentity(env, sourceId);
+        if (parent.kind !== "research-output")
+          throw new InputError("Derivation sources must be research outputs");
+        sourceIds.push(parent.id);
+      }
       const title = text(b.title);
       await env.DB.batch([
         env.DB.prepare(
@@ -815,6 +936,16 @@ export async function completionApi(
           title,
           JSON.stringify({ origin: division.id, key: id, type }),
           JSON.stringify({ status: "draft", type, source }),
+        ),
+        ...sourceIds.map((sourceId) =>
+          env.DB.prepare(
+            "INSERT INTO identity_relationships(id,source_id,target_id,relation,evidence) VALUES (?,?,?,'derives_from',?)",
+          ).bind(
+            `derivation:${id}:${sourceId}`,
+            id,
+            sourceId,
+            JSON.stringify(proof),
+          ),
         ),
         env.DB.prepare(
           "INSERT INTO research_versions(output_id,predecessor_id,version) VALUES (?,?,?)",
@@ -846,6 +977,35 @@ export async function completionApi(
         assumptions = text(b.assumptions, 4000);
       if (!["scenario", "forecast", "operational"].includes(modelClass))
         throw new InputError("Invalid model class");
+      const domain =
+        b.domain === undefined ? "unspecified" : text(b.domain, 80);
+      const ownerId =
+        b.ownerId === undefined
+          ? actor.id
+          : (await requiredIdentity(env, b.ownerId)).id;
+      let predecessor: string | null = null;
+      if (b.predecessorId !== undefined) {
+        predecessor = text(b.predecessorId);
+        const prior = await env.DB.prepare(
+          "SELECT r.model_class,r.version,p.domain FROM simulation_registry r JOIN simulation_provenance p ON p.model_id=r.id WHERE r.id=? AND NOT EXISTS(SELECT 1 FROM simulation_provenance WHERE predecessor_id=r.id)",
+        )
+          .bind(predecessor)
+          .first<{ model_class: string; version: string; domain: string }>();
+        if (
+          !prior ||
+          prior.model_class !== modelClass ||
+          prior.domain !== domain ||
+          prior.version === version
+        )
+          throw new InputError(
+            "A current predecessor with matching domain/class and a distinct version is required",
+            409,
+          );
+      }
+      const proof =
+        b.evidence === undefined
+          ? { sources: [source], facts: [assumptions] }
+          : evidence(b.evidence);
       await env.DB.batch([
         env.DB.prepare(
           "INSERT INTO universe_identities(id,kind,label,invariants) VALUES (?,'simulation-model',?,?)",
@@ -872,6 +1032,21 @@ export async function completionApi(
           assumptions,
           actor.id,
         ),
+        env.DB.prepare(
+          "INSERT INTO simulation_provenance(model_id,owner_id,domain,predecessor_id,evidence) VALUES (?,?,?,?,?)",
+        ).bind(id, ownerId, domain, predecessor, JSON.stringify(proof)),
+        ...(predecessor
+          ? [
+              env.DB.prepare(
+                "INSERT INTO identity_relationships(id,source_id,target_id,relation,evidence) VALUES (?,?,?,'supersedes',?)",
+              ).bind(
+                `model-version:${id}`,
+                `simulation-model:${id}`,
+                `simulation-model:${predecessor}`,
+                JSON.stringify(proof),
+              ),
+            ]
+          : []),
         eventStatement(
           env,
           "ecosystem:max",
@@ -881,7 +1056,56 @@ export async function completionApi(
           { id, version, modelClass, assumptions },
         ),
       ]);
-      return json({ id, version, modelClass }, 201);
+      return json(
+        {
+          id,
+          version,
+          modelClass,
+          ownerId,
+          domain,
+          predecessorId: predecessor,
+          identityId: `simulation-model:${id}`,
+        },
+        201,
+      );
+    }
+    const replay = path.match(/^\/api\/substrate\/scenarios\/([^/]+)\/replay$/);
+    if (replay) {
+      const runId = decodeURIComponent(replay[1]);
+      const run = await env.DB.prepare(
+        "SELECT input,output FROM simulation_runs WHERE id=?",
+      )
+        .bind(runId)
+        .first<{ input: string; output: string }>();
+      if (!run) throw new InputError("Scenario not found", 404);
+      const result = await replayEvidence(
+          JSON.parse(run.input),
+          JSON.parse(run.output),
+        ),
+        id = crypto.randomUUID();
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO simulation_replays(id,run_id,actor,input_hash,expected_output_hash,actual_output_hash,matched,engine_version) VALUES (?,?,?,?,?,?,?,?)",
+        ).bind(
+          id,
+          runId,
+          actor.id,
+          result.inputHash,
+          result.outputHash,
+          result.actualOutputHash,
+          result.matched ? 1 : 0,
+          result.engineVersion,
+        ),
+        eventStatement(
+          env,
+          `simulation:${runId}`,
+          "simulation.replayed",
+          actor.id,
+          "MAX-CORE Simulation",
+          { id, ...result },
+        ),
+      ]);
+      return json({ id, runId, ...result }, 201);
     }
     if (path === "/api/substrate/scenarios") {
       const modelId =
@@ -947,7 +1171,14 @@ export async function completionApi(
           JSON.stringify({ runId: id }),
         ),
       ]);
-      return json({ id, ...object(result) }, 201);
+      return json(
+        {
+          id,
+          ...object(result),
+          reproducibility: await simulationEvidence(scenario, result),
+        },
+        201,
+      );
     }
     return json({ error: "Route not found" }, 404);
   } catch (error) {

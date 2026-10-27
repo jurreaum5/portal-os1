@@ -168,6 +168,13 @@ export default function Completion({ area }: { area: string }) {
           </Link>
         </h2>
         <StateFields value={i.state} />
+        {i.kind === "research-output" && (
+          <p>
+            <Link to={`/portal/lineage?root=${encodeURIComponent(i.id)}`}>
+              Research lineage and publication history ↗
+            </Link>
+          </p>
+        )}
         <Link to={`/portal/twin?root=${encodeURIComponent(i.id)}`}>
           Relationships ↗
         </Link>

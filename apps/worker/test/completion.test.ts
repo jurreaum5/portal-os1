@@ -1022,7 +1022,7 @@ describe("Phase 4 production contracts", () => {
       "UNAVAILABLE",
     );
     expect(connectionStatus(true, true, "failed", fresh, now)).toBe(
-      "UNAVAILABLE",
+      "DISCONNECTED",
     );
     expect(connectionStatus(true, true, "succeeded", fresh, now)).toBe(
       "CONNECTED",
@@ -1093,14 +1093,12 @@ it("probes only the requested provider, respects cost controls and audits metada
       })),
     }),
   };
-  const fetcher = vi
-    .spyOn(globalThis, "fetch")
-    .mockResolvedValue(
-      Response.json({
-        choices: [{ message: { content: "OK" } }],
-        usage: { prompt_tokens: 10, completion_tokens: 1 },
-      }),
-    );
+  const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json({
+      choices: [{ message: { content: "OK" } }],
+      usage: { prompt_tokens: 10, completion_tokens: 1 },
+    }),
+  );
   const response = await call(
     "/api/models/check",
     { providerId: "probe-b" },
@@ -1165,4 +1163,311 @@ it("accepts explicit historical Sports data without relabelling it as current", 
   record.id = "current-invalid";
   record.category = "athlete";
   await expect(refreshSports(custom)).rejects.toThrow("Invalid Sports");
+});
+
+describe("Phase 5 acceptance contracts", () => {
+  it("marks unavailable providers disconnected while failing over, and invalidates changed configuration", async () => {
+    await base.DB.prepare("DELETE FROM model_attempts").run();
+    const provider = (id: string) => ({
+      id,
+      kind: "local",
+      baseUrl: `https://${id}.test/v1`,
+      model: "fixture",
+      inputMicrousdPerToken: 0,
+      outputMicrousdPerToken: 0,
+      maxInputBytes: 2000,
+      maxOutputTokens: 100,
+    });
+    const custom = {
+      ...base,
+      MODEL_CONFIG: JSON.stringify({
+        dailyBudgetMicrousd: 0,
+        providers: [provider("unavailable"), provider("alternative")],
+      }),
+    };
+    const fetcher = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("Unavailable", { status: 503 }))
+      .mockImplementation(async () =>
+        Response.json({
+          choices: [{ message: { content: "Observed answer" } }],
+          usage: { prompt_tokens: 10, completion_tokens: 3 },
+        }),
+      );
+    expect(await routeModel(custom, "evidence")).toMatchObject({
+      providerId: "alternative",
+    });
+    const { modelHealth } = await import("../src/model-router");
+    expect((await modelHealth(custom)).providers.map((p) => p.status)).toEqual([
+      "DISCONNECTED",
+      "CONNECTED",
+    ]);
+    await routeModel(custom, "recheck", "unavailable");
+    expect((await modelHealth(custom)).providers[0].status).toBe("DEGRADED");
+    custom.MODEL_CONFIG = JSON.stringify({
+      dailyBudgetMicrousd: 0,
+      providers: [{ ...provider("alternative"), model: "replacement" }],
+    });
+    expect((await modelHealth(custom)).providers[0].status).toBe("UNAVAILABLE");
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    fetcher.mockResolvedValueOnce(new Response("Unavailable", { status: 503 }));
+    const probe = (await (
+      await call("/api/models/check", { providerId: "alternative" }, custom)
+    ).json()) as { status: string; completed: boolean };
+    expect(probe.status).toBe("DISCONNECTED");
+    expect(probe.completed).toBe(false);
+  });
+  it("returns dependency relationship metadata and graph-native opportunity/search/risk results", async () => {
+    const a = await project(),
+      b = await project();
+    expect(
+      (
+        await call("/api/icv/relationships", {
+          sourceId: a,
+          targetId: b,
+          relation: "depends_on",
+          evidence: proof,
+        })
+      ).status,
+    ).toBe(201);
+    const traversal = (await (
+      await call(`/api/manifold/dependencies?root=${encodeURIComponent(a)}`)
+    ).json()) as {
+      visits: {
+        id: string;
+        relationship: {
+          source: string;
+          target: string;
+          relation: string;
+        } | null;
+      }[];
+    };
+    expect(
+      traversal.visits.find((v) => v.id === b)?.relationship,
+    ).toMatchObject({ source: a, target: b, relation: "depends_on" });
+    expect((await call("/api/manifold/opportunity")).status).toBe(200);
+    const search = (await (
+      await call(`/api/manifold?q=${encodeURIComponent(a)}`)
+    ).json()) as { nodes: { id: string }[] };
+    expect(search.nodes.map((n) => n.id)).toContain(a);
+    const { riskPropagation } = await import("../../../portal-os/manifold");
+    const propagation = riskPropagation(
+      {
+        nodes: [],
+        edges: [
+          { id: "dependency", source: a, target: b, relation: "depends_on" },
+        ],
+      },
+      [{ entityId: b, reasons: ["Observed risk"] }],
+    );
+    expect(
+      propagation[0].exposure.visits.find((v) => v.id === a)?.relationship
+        ?.relation,
+    ).toBe("depends_on");
+  });
+  it("returns source research for derived frameworks and retains version history", async () => {
+    const body = {
+      divisionId: "research:substrate",
+      type: "research-report",
+      title: "Research source",
+      source: "https://research.test/source",
+      evidence: proof,
+    };
+    const source = (await (
+      await call("/api/institute/outputs", body)
+    ).json()) as { id: string };
+    const framework = (await (
+      await call("/api/institute/outputs", {
+        ...body,
+        type: "framework",
+        title: "Derived framework",
+        derivesFrom: [source.id],
+      })
+    ).json()) as { id: string };
+    const lineage = (await (
+      await call(`/api/institute/lineage?entityId=${framework.id}`)
+    ).json()) as {
+      nodes: { id: string }[];
+      edges: { relation: string; target: string }[];
+    };
+    expect(lineage.nodes.map((n) => n.id)).toContain(source.id);
+    expect(lineage.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          relation: "derives_from",
+          target: source.id,
+        }),
+      ]),
+    );
+    expect(
+      (
+        await call("/api/institute/outputs", {
+          ...body,
+          derivesFrom: ["ecosystem:max"],
+        })
+      ).status,
+    ).toBe(400);
+  });
+  it("stores model identity, ownership, domain, provenance and distinct versions", async () => {
+    const body = {
+      id: "sports-model-v1",
+      version: "1",
+      modelClass: "scenario",
+      domain: "sports",
+      source: "https://models.test/v1",
+      assumptions: "Caller supplied events",
+      ownerId: "research:substrate",
+      evidence: proof,
+    };
+    expect((await call("/api/substrate/registry", body)).status).toBe(201);
+    const metadata = await base.DB.prepare(
+      "SELECT * FROM simulation_provenance WHERE model_id=?",
+    )
+      .bind(body.id)
+      .first<{ owner_id: string; domain: string; evidence: string }>();
+    expect(metadata).toMatchObject({
+      owner_id: body.ownerId,
+      domain: "sports",
+    });
+    expect(JSON.parse(metadata!.evidence)).toEqual(proof);
+    expect(await identity(base, `simulation-model:${body.id}`)).not.toBeNull();
+    const next = {
+      ...body,
+      id: "sports-model-v2",
+      version: "2",
+      predecessorId: body.id,
+    };
+    expect((await call("/api/substrate/registry", next)).status).toBe(201);
+    expect(
+      (await call("/api/substrate/registry", { ...next, id: "forked-v2" }))
+        .status,
+    ).toBe(409);
+  });
+  it("replays retained inputs with immutable hashes and no production mutation", async () => {
+    const scenario = {
+      entities: [],
+      relationships: [],
+      events: [],
+      uncertainty: [],
+      emergence: [],
+      steps: 2,
+    };
+    const first = (await (
+      await call("/api/substrate/scenarios", scenario)
+    ).json()) as {
+      id: string;
+      reproducibility: { inputHash: string; outputHash: string };
+    };
+    const second = (await (
+      await call("/api/substrate/scenarios", {
+        steps: 2,
+        emergence: [],
+        uncertainty: [],
+        events: [],
+        relationships: [],
+        entities: [],
+      })
+    ).json()) as typeof first;
+    expect(first.reproducibility).toEqual(second.reproducibility);
+    const replay = (await (
+      await call(`/api/substrate/scenarios/${first.id}/replay`, {})
+    ).json()) as {
+      matched: boolean;
+      inputHash: string;
+      actualOutputHash: string;
+      id: string;
+    };
+    expect(replay.matched).toBe(true);
+    expect(replay.inputHash).toBe(first.reproducibility.inputHash);
+    expect(replay.actualOutputHash).toBe(first.reproducibility.outputHash);
+    await expect(
+      base.DB.prepare("DELETE FROM simulation_replays WHERE id=?")
+        .bind(replay.id)
+        .run(),
+    ).rejects.toThrow();
+    expect((await call("/api/operations/status")).status).toBe(200);
+  });
+  it("requires approval, policy and audit for recovery evidence and supports compensation", async () => {
+    const before = await identity(base, "ecosystem:max");
+    const p = await proposal("ecosystem:max", "recovery-record", {
+      kind: "restore",
+      outcome: "passed",
+      source: "https://recovery.test/evidence",
+      observedAt: new Date(Date.now() - 1000).toISOString(),
+      summary: "Recorded restoration drill evidence",
+    });
+    await applyOperationalProposals(base);
+    expect((await identity(base, "ecosystem:max"))?.state).toBe(before?.state);
+    expect((await call(`/api/autonomy/${p.id}/approve`, {})).status).toBe(200);
+    expect(
+      await base.DB.prepare("SELECT id FROM universe_events WHERE id=?")
+        .bind(`effect:${p.id}`)
+        .first(),
+    ).not.toBeNull();
+    const operations = (await (
+      await call("/api/operations/status")
+    ).json()) as {
+      recovery: { status: string; verification: string };
+      monitoring: { governance: { auditGaps: number } };
+    };
+    expect(operations.recovery.status).toBe("CONNECTED");
+    expect(operations.recovery.verification).toContain("Governor-approved");
+    expect(operations.monitoring.governance.auditGaps).toBe(0);
+    const rollback = await proposal("ecosystem:max", "rollback", {
+      proposalId: p.id,
+    });
+    await call(`/api/autonomy/${rollback.id}/approve`, {});
+    expect((await identity(base, "ecosystem:max"))?.state).toBe(before?.state);
+    expect(
+      (
+        await call("/api/autonomy/proposals", {
+          entityId: "product:completion",
+          action: "promotion",
+          input: {},
+          evidence: proof,
+        })
+      ).status,
+    ).toBe(422);
+  });
+  it("exposes conditional long-horizon plans and sourced Sports confidence without invented forecasts", async () => {
+    const brief = (await (
+      await call("/api/bemax?horizonMonths=24")
+    ).json()) as {
+      plan: { horizonMonths: number; mode: string };
+      relatedDependencies: unknown;
+    };
+    expect(brief.plan.horizonMonths).toBe(24);
+    expect(brief.plan.mode).toContain("not a revenue prediction");
+    expect(brief.relatedDependencies).toBeDefined();
+    expect((await call("/api/bemax?horizonMonths=0")).status).toBe(400);
+    expect((await call("/api/sports/reports?type=simulation")).status).toBe(
+      200,
+    );
+  });
+});
+
+it("does not reuse Sports connection evidence after feed configuration changes", async () => {
+  const custom = {
+    ...base,
+    SPORTS_CONFIG: JSON.stringify({
+      provider: "feed-config-a",
+      leagues: ["NFL"],
+    }),
+    SPORTS_FEED: {
+      fetch: async () =>
+        Response.json({
+          provider: "feed-config-a",
+          production: true,
+          records: [],
+        }),
+    } as unknown as Fetcher,
+  };
+  await refreshSports(custom);
+  const { sportsHealth } = await import("../src/sports");
+  expect((await sportsHealth(custom))?.status).toBe("observed");
+  custom.SPORTS_CONFIG = JSON.stringify({
+    provider: "feed-config-b",
+    leagues: ["NFL"],
+  });
+  expect(await sportsHealth(custom)).toBeNull();
 });

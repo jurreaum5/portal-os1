@@ -2,6 +2,7 @@ export const operationalActions = [
   "resource-allocation",
   "capacity-change",
   "strategic-review",
+  "recovery-record",
   "work-assignment",
   "publishing-schedule",
   "risk-escalation",
@@ -19,6 +20,39 @@ export function operationalState(
   input: Record<string, unknown>,
 ): Record<string, unknown> {
   switch (action) {
+    case "recovery-record": {
+      if (
+        !["backup", "restore"].includes(String(input.kind)) ||
+        !["passed", "failed"].includes(String(input.outcome)) ||
+        !str(input.source, 1000) ||
+        !str(input.observedAt) ||
+        !Number.isFinite(Date.parse(input.observedAt)) ||
+        Date.parse(input.observedAt) > Date.now() ||
+        !str(input.summary, 2000)
+      )
+        throw new Error(
+          "Recovery records require kind, outcome, source, observed time and summary",
+        );
+      const source = new URL(String(input.source));
+      if (source.protocol !== "https:" || source.username || source.password)
+        throw new Error("Recovery evidence requires credential-free HTTPS");
+      const existing =
+        current.recoveryRecords && typeof current.recoveryRecords === "object"
+          ? current.recoveryRecords
+          : {};
+      return {
+        ...current,
+        recoveryRecords: {
+          ...existing,
+          [String(input.kind)]: {
+            outcome: input.outcome,
+            source: input.source,
+            observedAt: new Date(String(input.observedAt)).toISOString(),
+            summary: input.summary,
+          },
+        },
+      };
+    }
     case "strategic-review":
       if (
         !str(input.summary, 2000) ||

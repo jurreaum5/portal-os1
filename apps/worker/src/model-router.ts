@@ -1,3 +1,4 @@
+import { sha256 } from "./access";
 import { connectionStatus } from "../../../portal-os/production";
 import type { Env } from "./types";
 import { readObject } from "./customer-auth";
@@ -201,14 +202,20 @@ export async function routeModel(
       throw new Error("Cost reservation overflow");
     const id = crypto.randomUUID();
     const claimed = await env.DB.prepare(
-      `INSERT INTO model_attempts(id,provider_id,day,reserved_microusd,status)
- SELECT ?,?,?,?,'reserved' WHERE COALESCE((SELECT SUM(reserved_microusd) FROM model_attempts WHERE day=?),0)+?<=? AND (SELECT COUNT(*) FROM model_attempts WHERE day=?)<?`,
+      `INSERT INTO model_attempts(id,provider_id,day,reserved_microusd,status,config_fingerprint)
+ SELECT ?,?,?,?,'reserved',? WHERE COALESCE((SELECT SUM(reserved_microusd) FROM model_attempts WHERE day=?),0)+?<=? AND (SELECT COUNT(*) FROM model_attempts WHERE day=?)<?`,
     )
       .bind(
         id,
         p.id,
         day,
         reserve,
+        await sha256(
+          JSON.stringify({
+            provider: p,
+            credential: credentials[p.id] ?? null,
+          }),
+        ),
         day,
         reserve,
         config.dailyBudgetMicrousd,
@@ -268,37 +275,66 @@ export async function routeModel(
 export async function modelHealth(env: Env) {
   const config = modelConfig(env);
   const credentials = JSON.parse(env.MODEL_CREDENTIALS ?? "{}");
-  const results = await env.DB.prepare(
-    "SELECT provider_id AS providerId,status,latency_ms AS latencyMs,created_at AS createdAt FROM model_attempts m WHERE m.rowid=(SELECT MAX(n.rowid) FROM model_attempts n WHERE n.provider_id=m.provider_id) ORDER BY rowid DESC LIMIT 100",
-  ).all();
+  const observations = await Promise.all(
+    config.providers.map(async (p) => {
+      const fingerprint = await sha256(
+        JSON.stringify({ provider: p, credential: credentials[p.id] ?? null }),
+      );
+      const latest = await env.DB.prepare(
+        "SELECT provider_id AS providerId,status,latency_ms AS latencyMs,created_at AS createdAt FROM model_attempts WHERE provider_id=? AND config_fingerprint=? ORDER BY rowid DESC LIMIT 1",
+      )
+        .bind(p.id, fingerprint)
+        .first<{
+          providerId: string;
+          status: string;
+          latencyMs: number | null;
+          createdAt: string;
+        }>();
+      const recentFailures = await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM model_attempts WHERE provider_id=? AND config_fingerprint=? AND status='failed' AND created_at>=datetime('now','-24 hours')",
+      )
+        .bind(p.id, fingerprint)
+        .first<number>("count");
+      return { id: p.id, latest, recentFailures: recentFailures ?? 0 };
+    }),
+  );
+  const results = {
+    results: observations.flatMap((o) => (o.latest ? [o.latest] : [])),
+  };
   const spent = await env.DB.prepare(
     "SELECT COALESCE(SUM(reserved_microusd),0) AS reserved FROM model_attempts WHERE day=?",
   )
     .bind(new Date().toISOString().slice(0, 10))
     .first<number>("reserved");
   return {
-    providers: config.providers.map((p) => ({
-      id: p.id,
-      kind: p.kind,
-      model: p.model,
-      capabilities: ["text-generation"],
-      limits: {
-        maxInputBytes: p.maxInputBytes,
-        maxOutputTokens: p.maxOutputTokens,
-      },
-      credentialConfigured: p.kind === "local" || !!credentials[p.id],
-      status: connectionStatus(
+    providers: config.providers.map((p) => {
+      const observation = observations.find((o) => o.id === p.id)!;
+      const status = connectionStatus(
         true,
         p.kind === "local" || !!credentials[p.id],
-        results.results.find((r) => r.providerId === p.id)?.status as
-          string | undefined,
-        results.results.find((r) => r.providerId === p.id)?.createdAt as
-          string | undefined,
-      ),
-      health:
-        results.results.find((r) => r.providerId === p.id) ??
-        "No request samples",
-    })),
+        observation.latest?.status,
+        observation.latest?.createdAt,
+      );
+      return {
+        id: p.id,
+        kind: p.kind,
+        model: p.model,
+        capabilities: ["text-generation"],
+        limits: {
+          maxInputBytes: p.maxInputBytes,
+          maxOutputTokens: p.maxOutputTokens,
+        },
+        credentialConfigured: p.kind === "local" || !!credentials[p.id],
+        status:
+          status === "CONNECTED" && observation.recentFailures > 0
+            ? "DEGRADED"
+            : status,
+        recentFailures: observation.recentFailures,
+        health:
+          results.results.find((r) => r.providerId === p.id) ??
+          "No request samples",
+      };
+    }),
     usage: (
       await env.DB.prepare(
         "SELECT provider_id AS providerId,day,COUNT(*) AS requests,SUM(actual_microusd) AS actualMicrousd,SUM(reserved_microusd) AS reservedMicrousd FROM model_attempts GROUP BY provider_id,day ORDER BY day DESC LIMIT 200",

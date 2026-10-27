@@ -1,3 +1,4 @@
+import { sha256 } from "./access";
 import {
   analyseSports,
   type SportsObservation,
@@ -180,45 +181,56 @@ async function ingestSports(env: Env) {
   return { received: records.length };
 }
 export async function refreshSports(env: Env) {
+  const fingerprint = await sha256(env.SPORTS_CONFIG ?? "");
   try {
     const result = await ingestSports(env);
     await env.DB.prepare(
-      "INSERT INTO integration_health(id,status,message) VALUES ('sports-feed',?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,message=excluded.message,observed_at=CURRENT_TIMESTAMP",
+      "INSERT INTO integration_health(id,status,message,config_fingerprint) VALUES ('sports-feed',?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,message=excluded.message,config_fingerprint=excluded.config_fingerprint,observed_at=CURRENT_TIMESTAMP",
     )
       .bind(
         "blocked" in result ? "blocked" : "observed",
         "blocked" in result
           ? result.reason
           : "Validated production observations received",
+        fingerprint,
       )
       .run();
     return result;
   } catch (error) {
     await env.DB.prepare(
-      "INSERT INTO integration_health(id,status,message) VALUES ('sports-feed','failed','Feed unavailable or observations failed validation') ON CONFLICT(id) DO UPDATE SET status=excluded.status,message=excluded.message,observed_at=CURRENT_TIMESTAMP",
-    ).run();
+      "INSERT INTO integration_health(id,status,message,config_fingerprint) VALUES ('sports-feed','failed','Feed unavailable or observations failed validation',?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,message=excluded.message,config_fingerprint=excluded.config_fingerprint,observed_at=CURRENT_TIMESTAMP",
+    )
+      .bind(fingerprint)
+      .run();
     throw error;
   }
 }
 export async function sportsOverview(env: Env) {
   const config = sportsConfig(env);
-  const records = await listRows<{ data: string; previousData: string | null }>(
+  const records = await listRows<{
+    data: string;
+    previousData: string | null;
+    provider: string;
+    received_at: string;
+  }>(
     env,
-    `SELECT o.data,(SELECT p.data FROM sports_observations p WHERE p.entity_id=o.entity_id AND p.category=o.category AND (p.observed_at<o.observed_at OR (p.observed_at=o.observed_at AND p.id<o.id)) ORDER BY p.observed_at DESC,p.id DESC LIMIT 1) AS previousData
+    `SELECT o.provider,o.received_at,o.data,(SELECT p.data FROM sports_observations p WHERE p.entity_id=o.entity_id AND p.category=o.category AND (p.observed_at<o.observed_at OR (p.observed_at=o.observed_at AND p.id<o.id)) ORDER BY p.observed_at DESC,p.id DESC LIMIT 1) AS previousData
     FROM sports_observations o WHERE o.id=(SELECT n.id FROM sports_observations n WHERE n.entity_id=o.entity_id AND n.category=o.category ORDER BY n.observed_at DESC,n.id DESC LIMIT 1) ORDER BY observed_at DESC LIMIT 200`,
   );
   const intelligence = analyseSports(
     records.map((r) => ({
-      current: JSON.parse(r.data) as SportsObservation,
+      current: {
+        ...JSON.parse(r.data),
+        feedProvenance: { provider: r.provider, receivedAt: r.received_at },
+        confidenceRating: "unverified-provider-observation",
+      } as SportsObservation,
       previous: r.previousData
         ? (JSON.parse(r.previousData) as SportsObservation)
         : null,
     })),
   );
   return {
-    health: await env.DB.prepare(
-      "SELECT status,message,observed_at AS observedAt FROM integration_health WHERE id='sports-feed'",
-    ).first(),
+    health: await sportsHealth(env),
     leagues: config.leagues,
     capabilities: sportsCapabilities,
     configured: !!env.SPORTS_FEED && !!config.provider,
@@ -226,4 +238,17 @@ export async function sportsOverview(env: Env) {
     source:
       "Provider observations only. Older than 24 hours is stale; missing data remains unknown. Simulation uses /api/substrate/scenarios.",
   };
+}
+
+export async function sportsHealth(env: Env) {
+  return env.DB.prepare(
+    "SELECT status,message,observed_at,observed_at AS observedAt FROM integration_health WHERE id='sports-feed' AND config_fingerprint=?",
+  )
+    .bind(await sha256(env.SPORTS_CONFIG ?? ""))
+    .first<{
+      status: string;
+      message: string;
+      observed_at: string;
+      observedAt: string;
+    }>();
 }

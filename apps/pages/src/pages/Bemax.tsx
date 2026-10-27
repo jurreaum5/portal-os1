@@ -5,6 +5,17 @@ import { useApi } from "../hooks/useApi";
 import { AsyncState } from "../components/AsyncState";
 import { RefreshControl } from "../components/RefreshControl";
 interface Brief {
+  plan: {
+    horizonMonths: number;
+    mode: string;
+    milestones: {
+      entityId: string;
+      priority: number;
+      action: string;
+      gates: string[];
+    }[];
+    assumptions: string[];
+  };
   summary: string;
   questions: string[];
   recommendations: {
@@ -138,6 +149,23 @@ export default function Bemax() {
                 {summary}
               </p>
             )}
+          </section>
+          <section className="panel">
+            <h2>Long-horizon plan · {data.plan.horizonMonths} months</h2>
+            <p>{data.plan.mode}</p>
+            <ul>
+              {data.plan.assumptions.map((a) => (
+                <li key={a}>{a}</li>
+              ))}
+            </ul>
+            {data.plan.milestones.slice(0, 10).map((m) => (
+              <p key={m.entityId}>
+                <strong>
+                  {m.priority}. {m.entityId}
+                </strong>{" "}
+                — {m.action} Gates: {m.gates.join("; ")}
+              </p>
+            ))}
           </section>
           <section
             aria-label="Recommended next actions"

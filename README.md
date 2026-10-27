@@ -81,3 +81,5 @@ existing Governor and ecosystem URLs remain available. Live production intellige
 requires configured provider adapters and verified external evidence.
 
 Phase 4 integration contracts and deployment recovery plan: [Production operations](docs/10_PRODUCTION_OPERATIONS.md).
+
+Phase 5 acceptance contracts and readiness limits: [Production readiness](docs/11_PHASE5_READINESS.md).

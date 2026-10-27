@@ -75,7 +75,10 @@ export function manifoldView(
     direction,
     relation: relation ?? null,
     depth,
-    visits,
+    visits: visits.map((v) => ({
+      ...v,
+      relationship: g.edges.find((e) => e.id === v.edgeId) ?? null,
+    })),
     nodes: g.nodes.filter((n) => ids.has(n.id)),
     edges: g.edges.filter(
       (e) =>
@@ -87,5 +90,34 @@ export function manifoldView(
     sources: ["/api/twin/graph"],
     confidence:
       "Recorded graph relationships; missing relationships are unknown",
+  };
+}
+
+/** Exposure follows consumers of a risky prerequisite, preserving edge provenance. */
+export function riskPropagation(
+  g: ManifoldGraph,
+  risks: { entityId: string; reasons: string[] }[],
+) {
+  return risks.map((r) => ({
+    ...r,
+    exposure: manifoldView(g, r.entityId, "incoming", "depends_on"),
+    confidence:
+      "Recorded risk and dependency exposure; no probability or causal forecast",
+    sources: ["/api/intelligence", "/api/twin/graph"],
+  }));
+}
+export function ecosystemSearch(g: ManifoldGraph, query: string) {
+  const q = query.toLowerCase();
+  const nodes = g.nodes
+    .filter((n) => `${n.id} ${n.label} ${n.kind}`.toLowerCase().includes(q))
+    .slice(0, 100);
+  const ids = new Set(nodes.map((n) => n.id));
+  return {
+    query,
+    nodes,
+    edges: g.edges
+      .filter((e) => ids.has(e.source) || ids.has(e.target))
+      .slice(0, 500),
+    limit: 100,
   };
 }

@@ -1,8 +1,9 @@
 import type { Env } from "./types";
 import { modelHealth } from "./model-router";
-import { sportsConfig, sportsOverview } from "./sports";
+import { sportsConfig, sportsOverview, sportsHealth } from "./sports";
 import { connectionStatus } from "../../../portal-os/production";
-import { listRows } from "./universe-store";
+import { readUniverse } from "./universe-api";
+import { listRows, identity } from "./universe-store";
 export async function productionRead(
   url: URL,
   env: Env,
@@ -10,9 +11,7 @@ export async function productionRead(
   if (url.pathname === "/api/operations/status") {
     const providers = await modelHealth(env),
       config = sportsConfig(env);
-    const feed = await env.DB.prepare(
-      "SELECT * FROM integration_health WHERE id='sports-feed'",
-    ).first<{ status: string; observed_at: string }>();
+    const feed = await sportsHealth(env);
     const serviceBindings = [
       ["factory-executor", !!env.ICVS_EXECUTOR],
       ["factory-publisher", !!env.ICVS_PUBLISHER],
@@ -46,15 +45,102 @@ export async function productionRead(
         ),
       },
     ];
+    const universe = await readUniverse(env);
+    const governance = await listRows<{ status: string; count: number }>(
+      env,
+      "SELECT status,COUNT(*) AS count FROM autonomy_proposals GROUP BY status",
+    );
+    const lifecycle = await listRows(
+      env,
+      "SELECT status,COUNT(*) AS count FROM approvals GROUP BY status",
+    );
+    const compensation = await listRows(
+      env,
+      "SELECT status,COUNT(*) AS count FROM compensation_jobs GROUP BY status",
+    );
+    const simulations = await env.DB.prepare(
+      "SELECT (SELECT COUNT(*) FROM simulation_registry) AS registered,(SELECT COUNT(*) FROM simulation_runs) AS runs,(SELECT COUNT(*) FROM simulation_replays) AS replays,(SELECT COUNT(*) FROM simulation_replays WHERE matched=0) AS mismatches",
+    ).first<{
+      registered: number;
+      runs: number;
+      replays: number;
+      mismatches: number;
+    }>();
+    const auditGaps =
+      (await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM autonomy_proposals p WHERE p.status='applied' AND (NOT EXISTS(SELECT 1 FROM autonomy_effects e WHERE e.proposal_id=p.id) OR NOT EXISTS(SELECT 1 FROM universe_events e WHERE e.id='effect:'||p.id))",
+      ).first<number>("count")) ?? 0;
+    const root = await identity(env, "ecosystem:max");
+    const recoveryRecords = root
+      ? (JSON.parse(root.state).recoveryRecords ?? {})
+      : {};
+    const recoveryState = (kind: string) => {
+      const record = recoveryRecords[kind];
+      return {
+        status: record
+          ? connectionStatus(
+              true,
+              true,
+              record.outcome === "passed" ? "observed" : "blocked",
+              record.observedAt,
+            )
+          : "UNAVAILABLE",
+        reason:
+          record?.summary ?? "No Governor-approved recovery evidence recorded",
+        evidence: record ?? null,
+        verification:
+          "Governor-approved evidence; not an automated restoration test",
+      };
+    };
+    const monitors = [
+      {
+        id: "governance",
+        status: auditGaps
+          ? "BLOCKED"
+          : governance.some((g) => g.status === "conflict" && g.count > 0)
+            ? "DEGRADED"
+            : "CONNECTED",
+        action: `${auditGaps} missing effect/audit records; inspect conflicts and pending approvals.`,
+      },
+      {
+        id: "simulations",
+        status: simulations?.mismatches
+          ? "BLOCKED"
+          : simulations?.replays
+            ? "CONNECTED"
+            : "UNAVAILABLE",
+        action:
+          "Inspect retained replay evidence before relying on reproducibility.",
+      },
+      {
+        id: "risk",
+        status: universe.summary.riskProducts ? "DEGRADED" : "CONNECTED",
+        action: `${universe.summary.riskProducts} products have recorded risk flags.`,
+      },
+    ];
     return Response.json({
+      monitoring: {
+        governance: {
+          proposals: governance,
+          lifecycle,
+          compensation,
+          auditGaps,
+        },
+        simulations,
+        risks: universe.alerts,
+        monitors,
+        sources: ["/api/autonomy", "/api/substrate", "/api/intelligence"],
+      },
       observedAt: new Date().toISOString(),
       integrations,
-      alerts: integrations
+      alerts: [...integrations, ...monitors]
         .filter((i) => i.status !== "CONNECTED")
         .map((i) => ({
           ...i,
           action:
-            "Review configuration, credentials and latest observed outcome before relying on this integration.",
+            "action" in i
+              ? i.action
+              : "Review configuration, credentials and latest observed outcome before relying on this integration.",
         })),
       providers,
       secrets: {
@@ -65,20 +151,24 @@ export async function productionRead(
         },
       },
       auditExport: "/api/operations/audit",
-      recovery: {
-        status: "UNAVAILABLE",
-        reason:
-          "No deployment recovery drill recorded. Follow docs/10_PRODUCTION_OPERATIONS.md.",
-      },
-      backup: {
-        status: "UNAVAILABLE",
-        reason:
-          "No verified deployment backup or restoration evidence configured.",
-      },
+      recovery: recoveryState("restore"),
+      backup: recoveryState("backup"),
       method:
         "CONNECTED requires a successful observed request within 24 hours. Configuration alone does not establish availability.",
     });
   }
+  if (url.pathname === "/api/operations/recovery")
+    return Response.json({
+      records: await listRows(
+        env,
+        "SELECT e.* FROM universe_events e JOIN autonomy_proposals p ON e.id='effect:'||p.id WHERE p.action IN ('recovery-record','rollback') ORDER BY e.sequence DESC LIMIT 200",
+      ),
+      propose: "/api/autonomy/proposals",
+      action: "recovery-record",
+      decisions: "/api/autonomy",
+      method:
+        "Recorded through existing proposal, approval, policy, audit and compensation controls",
+    });
   if (url.pathname === "/api/operations/audit") {
     const after = Number(url.searchParams.get("after") ?? 0);
     if (!Number.isSafeInteger(after) || after < 0)
@@ -106,7 +196,9 @@ export async function productionRead(
     const overview = await sportsOverview(env),
       league = url.searchParams.get("league"),
       entity = url.searchParams.get("entityId");
-    const type = url.searchParams.get("type") ?? "league";
+    const type =
+      url.searchParams.get("type") ??
+      (url.pathname.endsWith("lab") ? "athlete" : "league");
     const categories: Record<string, string[] | null> = {
       team: ["team"],
       league: null,
@@ -115,6 +207,8 @@ export async function productionRead(
       business: ["business", "market"],
       injury: ["injury"],
       athlete: ["athlete", "injury", "scouting", "historical"],
+      simulation: ["simulation"],
+      market: ["market"],
     };
     if (!Object.hasOwn(categories, type))
       return Response.json({ error: "Unknown report type" }, { status: 400 });
@@ -133,7 +227,9 @@ export async function productionRead(
         ? "UNAVAILABLE"
         : records.every((r) => r.stale)
           ? "STALE"
-          : "CONNECTED",
+          : records.some((r) => r.stale)
+            ? "DEGRADED"
+            : "CONNECTED",
       records,
       sources: [...new Set(records.map((r) => r.source))],
       confidence:

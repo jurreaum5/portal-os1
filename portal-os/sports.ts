@@ -1,5 +1,7 @@
 /** Descriptive intelligence over sourced measurements. Never infers diagnoses or draft quality. */
 export interface SportsObservation {
+  feedProvenance?: { provider: string; receivedAt: string };
+  confidenceRating?: string;
   id: string;
   entityId: string;
   label: string;
