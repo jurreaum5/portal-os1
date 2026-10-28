@@ -1,3 +1,4 @@
+import { descriptiveUncertainty } from "../../../portal-os/uncertainty";
 import {
   recommendations,
   departmentMetrics,
@@ -388,6 +389,10 @@ export async function operationalApi(
         .all<{ id: string; name: string }>()
     ).results;
     return json({
+      uncertainty: descriptiveUncertainty([
+        "Selected growth remains constant.",
+        "No historical trend is available.",
+      ]),
       method:
         "Scenario estimate: current monthly revenue × selected growth assumption. No historical trend is available.",
       divisions: divisions.map((d) => {

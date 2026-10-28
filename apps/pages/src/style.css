@@ -3953,3 +3953,75 @@ td {
     grid-template-columns: 1fr;
   }
 }
+
+/* Institute shares the existing console palette and panel system. */
+.institute-console {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.institute-console .panel {
+  min-width: 0;
+}
+.institute-console h2 {
+  margin-bottom: 14px;
+}
+.institute-console h3 {
+  margin: 14px 0 8px;
+}
+.institute-console p {
+  margin: 10px 0;
+  line-height: 1.6;
+}
+.institute-console label {
+  display: block;
+  margin: 16px 0 7px;
+  font-weight: 600;
+}
+.institute-console input,
+.institute-console select,
+.institute-console textarea {
+  display: block;
+  width: min(100%, 650px);
+  padding: 11px 12px;
+  border: 1px solid #d7dce7;
+  border-radius: 8px;
+  background: #fff;
+  color: #263451;
+  font: inherit;
+  box-sizing: border-box;
+}
+.institute-console textarea {
+  min-height: 105px;
+  resize: vertical;
+}
+.institute-console .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+.institute-console form > button {
+  margin-top: 18px;
+}
+.institute-console code,
+.institute-console pre {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.institute-console details {
+  margin-top: 16px;
+}
+.institute-console pre {
+  padding: 16px;
+  background: #f7f8fc;
+  border-radius: 8px;
+  max-height: 420px;
+  overflow: auto;
+}
+.institute-console [role="alert"] {
+  color: #a72837;
+  padding: 12px;
+  background: #fff1f2;
+  border-radius: 8px;
+}

@@ -1,4 +1,6 @@
 export interface Env {
+  INTELLIGENCE_GATEWAY?: Fetcher;
+  INTELLIGENCE_PROVIDERS?: string;
   ICVS_EXECUTOR?: Fetcher;
   ICVS_PUBLISHER?: Fetcher;
   ICVS_COMPENSATOR?: Fetcher;

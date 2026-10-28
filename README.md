@@ -71,3 +71,10 @@ Migration 0005 adds QA and audit tables while preserving existing products, deci
 ## MAX Universe v2
 
 [Command centres, intelligence, digital twins, XR data and execution contracts](docs/08_MAX_UNIVERSE_V2.md). Apply additive migration 0007 before upgrading the private Worker. Governors enter at `/portal/governor`; staff enter at `/portal/ecosystem`.
+
+## MAX Institute and USS
+
+[Institute registries, identity continuity, simulation replay, provider operations and
+Class-C recovery](docs/09_USS_INSTITUTE.md). Apply additive migration 0008 before
+upgrading the private Worker. Open `/portal/institute` for the Institute console.
+MAX-CORE and the existing factory execution contracts remain unchanged.

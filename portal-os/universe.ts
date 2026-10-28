@@ -1,3 +1,4 @@
+import { descriptiveUncertainty } from "./uncertainty";
 /** Read-model intelligence. Never controls lifecycle transitions or MAX-CORE. */
 export interface TwinProduct {
   id: string;
@@ -70,6 +71,9 @@ export function analyseProduct(p: TwinProduct) {
     promotionCandidate: opportunities.length > 0,
     archiveCandidate: p.status === "Paused" && p.score < 40,
     forecast: {
+      uncertainty: descriptiveUncertainty([
+        "Reported revenue remains unchanged.",
+      ]),
       reportedMonthlyUsd: p.revenue,
       baselineNextMonthUsd: p.revenue,
       method:
@@ -124,6 +128,9 @@ export function analyseUniverse(
         })),
       ),
       forecastMonthlyUsd: revenue,
+      forecastUncertainty: descriptiveUncertainty([
+        "Reported revenue remains unchanged.",
+      ]),
     };
   });
   const rank = (metric: (p: ProductTwin) => number | null) =>
@@ -290,6 +297,21 @@ export function revenueScenarios(
   return {
     months,
     monthlyGrowthPct,
+    uncertainty: descriptiveUncertainty(
+      [
+        `Monthly growth remains ${monthlyGrowthPct}% for ${months} months.`,
+        "Reported revenue is the starting baseline.",
+      ],
+      {
+        lower:
+          universe.summary.reportedMonthlyUsd *
+          factor(Math.min(-5, monthlyGrowthPct)),
+        upper:
+          universe.summary.reportedMonthlyUsd *
+          factor(Math.max(10, monthlyGrowthPct)),
+        unit: "monthly USD; scenario envelope, not confidence interval",
+      },
+    ),
     method:
       "Reported monthly USD × compound monthly growth assumption. This is a scenario, not a prediction.",
     divisions: universe.divisions.map((d) => ({

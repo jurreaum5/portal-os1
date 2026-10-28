@@ -1,3 +1,4 @@
+import { substrateGraph } from "./substrate";
 import { executionCapacity } from "./execution";
 import type { Env } from "./types";
 import {
@@ -205,6 +206,11 @@ async function graph(env: Env) {
       target: `product:${r.targetId}`,
       relation: r.relation,
     });
+  const substrate = await substrateGraph(env);
+  nodes.push(...substrate.nodes);
+  edges.push(...substrate.edges);
+  for (const node of substrate.nodes)
+    add("division:max-institute", node.id, "governs");
   return { schemaVersion: 1, nodes, edges, sampledAt: u.sampledAt };
 }
 const validString = (v: unknown, max = 120): v is string =>
