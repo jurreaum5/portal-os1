@@ -1,6 +1,104 @@
 # API Standards
 
-## Permissions
+## Overview
+
+This document defines the authoritative API contract for Portal-OS1, including authentication, response envelopes, operational states, pagination, and endpoint-level requirements. It is the source-of-truth companion to the architecture layer definitions in `docs/architecture/`.
+
+## Authentication
+
+All endpoints require authentication.
+
+Header:
+
+```http
+Authorization: Bearer <token>
+```
+
+Required claims:
+
+- userId
+- role
+- permissions
+
+Supported roles:
+
+```text
+VIEWER
+CONTRIBUTOR
+REVIEWER
+APPROVER
+GOVERNOR
+ADMIN
+```
+
+## Provider states
+
+Provider lifecycle states must be explicit and must remain aligned with the platform governance model:
+
+```text
+CONNECTED
+DEGRADED
+STALE
+BLOCKED
+DISCONNECTED
+UNCONFIGURED
+```
+
+## Standard success response
+
+```json
+{
+  "requestId": "req-123",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "data": {}
+}
+```
+
+## Standard paginated response
+
+```json
+{
+  "requestId": "req-123",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "data": [],
+  "page": 1,
+  "pageSize": 50,
+  "total": 1000,
+  "hasNext": true
+}
+```
+
+## Standard error response
+
+```json
+{
+  "requestId": "req-123",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Resource not found",
+    "details": {}
+  }
+}
+```
+
+## Error codes
+
+```text
+NOT_FOUND
+VALIDATION_FAILED
+UNAUTHORIZED
+FORBIDDEN
+CONFLICT
+RATE_LIMITED
+APPROVAL_REQUIRED
+DEPENDENCY_FAILURE
+INTERNAL_ERROR
+```
+
+---
+
+# Permissions
 
 Roles:
 
@@ -13,9 +111,11 @@ GOVERNOR
 ADMIN
 ```
 
+Use the pattern `<role>+` to denote access for that role and all higher-privilege roles.
+
 ---
 
-## Common Pagination
+# Common Pagination
 
 Request:
 
@@ -30,13 +130,14 @@ Response:
   "data": [],
   "page": 1,
   "pageSize": 50,
-  "total": 1000
+  "total": 1000,
+  "hasNext": true
 }
 ```
 
 ---
 
-## Common Errors
+# Common Errors
 
 ```json
 {
@@ -246,3 +347,91 @@ Response:
   "approved": true
 }
 ```
+
+---
+
+# ICV ENDPOINTS
+
+## GET /api/icv
+
+Permissions:
+
+VIEWER+
+
+Request:
+
+```json
+{
+  "page": 1,
+  "pageSize": 50,
+  "entityType": "product",
+  "owner": "ops"
+}
+```
+
+Response:
+
+```json
+{
+  "data": [
+    {
+      "identityId": "id-001",
+      "entityType": "product",
+      "owner": "ops"
+    }
+  ],
+  "page": 1,
+  "pageSize": 50,
+  "total": 1,
+  "hasNext": false
+}
+```
+
+Acceptance tests:
+
+- ICV-001
+
+---
+
+## GET /api/icv/{identityId}
+
+Permissions:
+
+VIEWER+
+
+Purpose:
+
+Return the canonical identity record for the requested identity.
+
+Response:
+
+```json
+{
+  "data": {
+    "identityId": "id-001",
+    "entityType": "product",
+    "owner": "ops",
+    "status": "ACTIVE"
+  }
+}
+```
+
+Errors:
+
+```text
+NOT_FOUND
+UNAUTHORIZED
+FORBIDDEN
+```
+
+Acceptance tests:
+
+- ICV-002
+
+---
+
+## Notes
+
+- Identity, provenance, replay, governance, auditability, and recovery are first-class concerns.
+- All ICV access must preserve lineage and traceability across provider, simulation, and governance events.
+- This specification remains subordinate to the architecture authority in `docs/architecture/`.
