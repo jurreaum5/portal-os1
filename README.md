@@ -71,3 +71,12 @@ Migration 0005 adds QA and audit tables while preserving existing products, deci
 ## MAX Universe v2
 
 [Command centres, intelligence, digital twins, XR data and execution contracts](docs/08_MAX_UNIVERSE_V2.md). Apply additive migration 0007 before upgrading the private Worker. Governors enter at `/portal/governor`; staff enter at `/portal/ecosystem`.
+
+## BEMAX V3 implementation blueprint
+
+The [BEMAX AI Operating System README](docs/bemax/README.md) defines the proposed
+V2-to-V3 transformation: ICV identity, persistent memory, the Manifold, conversation,
+provider-independent reasoning and Governor-controlled actions. It includes route
+and schema contracts, a phased migration and rollback plan, and an
+[acceptance specification](docs/bemax/acceptance.feature). These are implementation
+requirements; V3 runtime capabilities are not yet delivered by this blueprint.
