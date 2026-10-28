@@ -4,6 +4,7 @@ import { Icon } from "./Icon";
 const links = [
   ["/portal/governor", "governance", "Governor console"],
   ["/portal/ecosystem", "globe", "MAX Universe"],
+  ["/portal/institute", "governance", "Institute & USS"],
   ["/portal/intelligence", "spark", "Intelligence"],
   ["/portal/twin", "portfolio", "Digital twin"],
   ["/portal/marketplace", "products", "Marketplace"],

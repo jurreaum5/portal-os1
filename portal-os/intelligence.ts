@@ -1,3 +1,4 @@
+import { descriptiveUncertainty } from "./uncertainty";
 export interface PortfolioProduct {
   id: string;
   name: string;
@@ -25,6 +26,13 @@ export function recommendations(products: PortfolioProduct[]) {
             priority: p.status === "Attention" ? "High" : "Medium",
             reason,
             score: p.score,
+            evidence: { stage: p.stage, status: p.status, score: p.score },
+            sources: [`/api/products/${p.id}`],
+            confidence: null,
+            tradeoffs: [
+              "Review delays advancement.",
+              "Acting without further evidence increases uncertainty.",
+            ],
           },
         ]
       : [];
@@ -46,6 +54,10 @@ export function departmentMetrics(
     backlog: Math.max(0, queue.length - workload),
     capacityUnit: "concurrent operations",
     forecasts: {
+      uncertainty: descriptiveUncertainty([
+        "Arrival and completion rates remain unchanged.",
+        "The last seven days represent future capacity.",
+      ]),
       daysToClear:
         completed7d > 0 ? Math.ceil((queue.length * 7) / completed7d) : null,
       method:

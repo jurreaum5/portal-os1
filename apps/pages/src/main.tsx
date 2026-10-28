@@ -1,3 +1,4 @@
+import Institute from "./pages/Institute";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route, Link, Navigate } from "react-router-dom";
@@ -82,6 +83,7 @@ createRoot(document.getElementById("root")!).render(
               }
             />
             <Route path="portal/divisions/:id" element={<DivisionCentre />} />
+            <Route path="portal/institute" element={<Institute />} />
             <Route path="portal/intelligence" element={<Intelligence />} />
             <Route path="portal/products/:id/twin" element={<ProductTwin />} />
             <Route path="portal/twin" element={<TwinGraph />} />

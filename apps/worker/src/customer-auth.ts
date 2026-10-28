@@ -34,7 +34,7 @@ export async function customer(
     .first<Customer>();
 }
 export async function readObject(
-  request: Request,
+  request: Pick<Request, "body">,
 ): Promise<Record<string, unknown>> {
   const reader = request.body?.getReader();
   if (!reader) throw new Error("Expected a JSON object");
