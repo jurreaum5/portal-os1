@@ -1,5 +1,125 @@
 # MAX Institute and Unified Simulation Substrate
 
+## MAX-Institute charter
+
+MAX-Institute is a virtual-first, zero-capital research institution dedicated to identity physics, syntropy, collapse dynamics, quantum identity modeling, simulation architecture, governance physics, and planetary ecosystem modeling. It functions as an unincorporated research collective that generates knowledge through conceptual physics, simulation engines, software infrastructure, and cloud-native systems rather than through physical facilities, capital acquisition, or traditional institutional hierarchy.
+
+### Mission
+
+MAX-Institute exists to establish a new research paradigm grounded in:
+- Identity Physics
+- Syntropy
+- Collapse Dynamics
+- Planetary Ecosystem Simulation
+- Quantum Identity Modeling
+- Governance Physics
+- Complexity and Emergence
+
+Its aim is to develop, simulate, and formalize identity-driven systems, computational cosmology, ecosystem models, and OS-level conceptual architectures in a way that is rigorous, scalable, and independent of conventional institutional forms. It also extends into applied strategic intelligence through MAX Sports, linking research, simulation, and governance to performance systems, ecosystem modeling, and operational decision support.
+
+### Operating principle
+
+The institute’s core model is:
+
+Conceptual Physics
++
+Simulation
++
+OS Architecture
+=
+Meaningful Research Output
+
+This approach allows research to proceed without requiring:
+- physical facilities
+- capital-heavy infrastructure
+- legal incorporation
+- traditional institutional authority
+
+### Core infrastructure
+
+The institute’s operating model includes:
+- MAX-SIM
+- Portal-OS / Portal-OS1
+- Cloudflare Workers
+- Compute Grid Operations
+- Virtual infrastructure and collaborative research surfaces
+
+### Governance philosophy
+
+MAX-Institute’s governance foundation is:
+
+Identity
+↓
+Structure
+↓
+Behavior
+↓
+Output
+↓
+Recognition
+
+This defines a post-capital governance model in which legitimacy emerges from:
+- identity coherence
+- simulation validity
+- narrative alignment
+- syntropy-aligned decision flows
+- collapse-flow constraints
+- OS-level integrity
+
+Rather than from:
+- titles
+- salary
+- physical presence
+- legal incorporation
+- conventional hierarchy
+
+### Governance modes
+
+Strict Mode
+Used for:
+- identity physics
+- simulation architecture
+- OS constraints
+- collapse rules
+
+Purpose:
+- coherence
+- consistency
+- integrity
+
+Advisory Mode
+Used for:
+- research
+- collaboration
+- narrative evolution
+- ecosystem modeling
+
+Purpose:
+- exploration
+- emergence
+- syntropy
+
+### Authority model
+
+Authority within MAX-Institute derives from:
+- conceptual contribution
+- simulation output
+- OS architecture
+- identity alignment
+
+Not from:
+- titles
+- institutional hierarchy
+- physical presence
+- legal status
+
+This establishes a governance structure grounded in epistemic contribution and system coherence rather than conventional institutional legitimacy. The institute’s applied intelligence extends through MAX Sports, connecting research output to strategic, competitive, and ecosystem-level decision systems.
+
+One-sentence summary:
+MAX-Institute is a virtual-first, zero-capital research collective focused on identity physics, simulation architecture, governance physics, and planetary ecosystem modeling, with applied intelligence extending through MAX Sports and operating through identity-driven, simulation-validated structures rather than traditional institutional hierarchy.
+
+---
+
 ## Boundaries
 
 Migration 0008 adds shared-reality persistence to the existing private Worker/D1.
@@ -32,9 +152,9 @@ not new controls for product lifecycle transitions.
 
 ```json
 {"registry":"research","title":"Substrate study","owner":"MAX Institute",
- "division":"substrate","lifecycle":"proposed","content":{"statement":"Research abstract"},
- "references":[],"uncertainty":{"confidence":null,"probability":null,
- "risk":"Unassessed","assumptions":[],"range":null}}
+  "division":"substrate","lifecycle":"proposed","content":{"statement":"Research abstract"},
+  "references":[],"uncertainty":{"confidence":null,"probability":null,
+  "risk":"Unassessed","assumptions":[],"range":null}}
 ```
 
 The server assigns the identity, author, time, version and canonical SHA-256 hash.
@@ -67,12 +187,12 @@ observations; it does not claim an automatic scientific discovery model.
 - `GET records?registry=research`: latest proposals and their actual decision.
 - `GET records/:id?version=N`: immutable snapshot (latest if version omitted).
 - `GET records/:id/history`, `/events`, `/lineage`: full bounded history, ordered
-  events, transitive pinned origins and immediate child records across revisions.
+events, transitive pinned origins and immediate child records across revisions.
 - `GET records/:id/event-replay`: verifies every snapshot hash and predecessor,
-  reconstructs the recorded timeline without re-executing external side effects.
+reconstructs the recorded timeline without re-executing external side effects.
 - `POST records/:id/review`, `/approve`, `/reject`, `/override`: require a reason
-  of 10–2000 characters. Pass `?version=N` to target an exact revision. Review is
-  mandatory; decisions are final. Override cannot bypass review or authentication.
+of 10–2000 characters. Pass `?version=N` to target an exact revision. Review is
+mandatory; decisions are final. Override cannot bypass review or authentication.
 - `POST records/:id/vote`: reason, council, vote (`for`, `against`, `abstain`).
   Votes are attributed evidence, not automatic quorum approval. Council quorum
   constitutions must be adopted before any autonomous vote-based approval.
@@ -125,8 +245,8 @@ Configure `INTELLIGENCE_PROVIDERS` as a JSON array (empty means no configured pr
 
 ```json
 [{"id":"primary","name":"Primary reasoning","type":"openai",
- "models":["deployment-selected-model"],"capabilities":["reasoning"],
- "credentialConfigured":true,"enabled":true,"budgetUsd":20,"staleAfterMs":60000}]
+  "models":["deployment-selected-model"],"capabilities":["reasoning"],
+  "credentialConfigured":true,"enabled":true,"budgetUsd":20,"staleAfterMs":60000}]
 ```
 
 Types: openai, gemini, claude, local. No models, endpoints or credentials are hardcoded.
