@@ -38,6 +38,18 @@
 
 ---
 
+## ICV / Event / Traceability Extension
+
+| Requirement | Runtime Component | Endpoint | Test |
+|------------|------------------|----------|------|
+| Identity Retrieval | Identity Registry | GET /api/icv/{identityId} | ICV-001 |
+| Snapshot Creation | Snapshot Service | POST /api/icv/snapshots | ICV-002 |
+| Identity Lineage | Identity Registry | GET /api/icv/{identityId}/history | ICV-003 |
+| Event Traceability | Event Registry | GET /api/icv/{identityId}/history | EVT-001 |
+| Event Replay | Replay Engine | POST /api/uss/replay | EVT-002 |
+
+---
+
 # Release Gate
 
 Production approval requires:
