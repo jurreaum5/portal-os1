@@ -213,6 +213,48 @@ async function graph(env: Env) {
     add("division:max-institute", node.id, "governs");
   return { schemaVersion: 1, nodes, edges, sampledAt: u.sampledAt };
 }
+function shortestGraphPath(
+  edges: GraphEdge[],
+  start: string,
+  target: string,
+): string[] | null {
+  if (start === target) return [start];
+  const queue: string[] = [start];
+  const seen = new Set([start]);
+  const previous = new Map<string, string | null>([[start, null]]);
+  while (queue.length) {
+    const current = queue.shift()!;
+    const neighbors = edges
+      .filter((edge) => edge.source === current)
+      .map((edge) => edge.target)
+      .concat(
+        edges
+          .filter((edge) => edge.target === current)
+          .map((edge) => edge.source),
+      );
+    for (const candidate of neighbors) {
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      previous.set(candidate, current);
+      if (candidate === target) {
+        const path: string[] = [target];
+        let cursor: string | null = target;
+        while (cursor !== start) {
+          cursor = previous.get(cursor) ?? null;
+          if (cursor === null) return null;
+          path.push(cursor);
+        }
+        return path.reverse();
+      }
+      queue.push(candidate);
+    }
+  }
+  return null;
+}
+function riskHeuristic(node: GraphNode) {
+  const status = (node.status ?? "").toLowerCase();
+  return /attention|paused|blocked|risk|failed|stale|degraded/.test(status);
+}
 const validString = (v: unknown, max = 120): v is string =>
   typeof v === "string" && v.trim().length > 0 && v.length <= max;
 export async function universeApi(
@@ -221,14 +263,22 @@ export async function universeApi(
 ): Promise<Response | null> {
   const url = new URL(request.url),
     path = url.pathname;
+  const allowed = new Set([
+    "/api/ecosystem",
+    "/api/intelligence",
+    "/api/intelligence/forecasts",
+    "/api/marketplace/operations",
+    "/api/execution-workers",
+    "/api/manifold",
+    "/api/manifold/navigation",
+    "/api/manifold/path",
+    "/api/manifold/search",
+    "/api/manifold/risk",
+    "/api/manifold/opportunity",
+    "/api/manifold/dependencies",
+  ]);
   if (
-    ![
-      "/api/ecosystem",
-      "/api/intelligence",
-      "/api/intelligence/forecasts",
-      "/api/marketplace/operations",
-      "/api/execution-workers",
-    ].includes(path) &&
+    !allowed.has(path) &&
     !path.startsWith("/api/twin/") &&
     !path.startsWith("/api/xr/") &&
     !/^\/api\/divisions\/[^/]+\/command-centre$/.test(path) &&
@@ -406,6 +456,122 @@ export async function universeApi(
     }
     if (request.method !== "GET")
       return json({ error: "Method not allowed" }, 405);
+    if (path === "/api/manifold" || path === "/api/manifold/navigation" || path === "/api/manifold/path" || path === "/api/manifold/search" || path === "/api/manifold/risk" || path === "/api/manifold/opportunity" || path === "/api/manifold/dependencies") {
+      const graphData = await graph(env);
+      const root = url.searchParams.get("root") ?? "ecosystem:max";
+      if (path === "/api/manifold")
+        return json({
+          schemaVersion: 1,
+          nodes: graphData.nodes,
+          edges: graphData.edges,
+          sampledAt: graphData.sampledAt,
+          counts: {
+            nodes: graphData.nodes.length,
+            edges: graphData.edges.length,
+          },
+        });
+      if (path === "/api/manifold/navigation") {
+        const depth = Number(url.searchParams.get("depth") ?? "2");
+        if (!graphData.nodes.some((node) => node.id === root))
+          return json({ error: "Graph root not found" }, 404);
+        if (!Number.isInteger(depth) || depth < 0 || depth > 8)
+          return json({ error: "depth must be 0–8" }, 400);
+        return json({
+          schemaVersion: 1,
+          ...topology(graphData.nodes, graphData.edges, root, depth),
+          sampledAt: graphData.sampledAt,
+        });
+      }
+      if (path === "/api/manifold/path") {
+        const target = url.searchParams.get("target");
+        if (!target) return json({ error: "target is required" }, 400);
+        if (!graphData.nodes.some((node) => node.id === root))
+          return json({ error: "Graph root not found" }, 404);
+        if (!graphData.nodes.some((node) => node.id === target))
+          return json({ error: "Target not found" }, 404);
+        const pathNodes = shortestGraphPath(graphData.edges, root, target);
+        return json({
+          root,
+          target,
+          path: pathNodes ?? [],
+          exists: pathNodes !== null,
+        });
+      }
+      if (path === "/api/manifold/search") {
+        const query = (url.searchParams.get("q") ?? url.searchParams.get("query") ?? "").trim();
+        if (!query) return json({ error: "q is required" }, 400);
+        const needle = query.toLowerCase();
+        const matches = graphData.nodes.filter((node) =>
+          [node.id, node.label, node.kind, node.status].some((value) =>
+            value.toLowerCase().includes(needle),
+          ),
+        );
+        return json({
+          query,
+          count: matches.length,
+          matches: matches.slice(0, 50).map((node) => ({
+            id: node.id,
+            kind: node.kind,
+            label: node.label,
+            status: node.status,
+          })),
+        });
+      }
+      if (path === "/api/manifold/risk") {
+        if (!graphData.nodes.some((node) => node.id === root))
+          return json({ error: "Graph root not found" }, 404);
+        const pathSet = new Set<string>();
+        const queue = [root];
+        while (queue.length) {
+          const current = queue.shift()!;
+          if (pathSet.has(current)) continue;
+          pathSet.add(current);
+          for (const edge of graphData.edges) {
+            if (edge.source === current && !pathSet.has(edge.target)) {
+              queue.push(edge.target);
+            }
+            if (edge.target === current && !pathSet.has(edge.source)) {
+              queue.push(edge.source);
+            }
+          }
+        }
+        const affected = graphData.nodes
+          .filter((node) => pathSet.has(node.id) && riskHeuristic(node))
+          .map((node) => ({ id: node.id, kind: node.kind, label: node.label, status: node.status }));
+        return json({ root, affected, method: "Graph traversal over reachable nodes; status heuristics identify risk-bearing nodes." });
+      }
+      if (path === "/api/manifold/opportunity") {
+        if (!graphData.nodes.some((node) => node.id === root))
+          return json({ error: "Graph root not found" }, 404);
+        const pathSet = new Set<string>();
+        const queue = [root];
+        while (queue.length) {
+          const current = queue.shift()!;
+          if (pathSet.has(current)) continue;
+          pathSet.add(current);
+          for (const edge of graphData.edges) {
+            if (edge.source === current && !pathSet.has(edge.target)) queue.push(edge.target);
+            if (edge.target === current && !pathSet.has(edge.source)) queue.push(edge.source);
+          }
+        }
+        const opportunities = graphData.nodes
+          .filter((node) => pathSet.has(node.id) && !riskHeuristic(node) && (node.kind === "product" || node.kind === "division" || node.kind === "pipeline"))
+          .map((node) => ({ id: node.id, kind: node.kind, label: node.label, status: node.status }));
+        return json({ root, opportunities, method: "Reachable nodes with no active risk heuristic signal." });
+      }
+      if (path === "/api/manifold/dependencies") {
+        if (!graphData.nodes.some((node) => node.id === root))
+          return json({ error: "Graph root not found" }, 404);
+        const related = graphData.edges.filter(
+          (edge) => edge.source === root || edge.target === root,
+        );
+        return json({
+          root,
+          incoming: related.filter((edge) => edge.target === root).map((edge) => ({ id: edge.id, source: edge.source, relation: edge.relation })),
+          outgoing: related.filter((edge) => edge.source === root).map((edge) => ({ id: edge.id, target: edge.target, relation: edge.relation })),
+        });
+      }
+    }
     if (path === "/api/execution-workers") {
       const operations = await rows<{
         id: string;
@@ -433,7 +599,7 @@ export async function universeApi(
       );
       const queues = await rows<{ stage: string; count: number }>(
         env,
-        "SELECT stage,COUNT(*) AS count FROM factory_runs WHERE status!='completed' AND NOT EXISTS (SELECT 1 FROM workflow_approvals w JOIN approvals a ON a.id=w.approval_id WHERE w.run_id=factory_runs.id AND a.status='pending') GROUP BY stage LIMIT 5001",
+        "SELECT stage,COUNT(*) AS count FROM factory_runs WHERE status!='completed' AND NOT EXISTS (SELECT 1 FROM workflow_approvals w JOIN approvals a ON a.id=w.approval_id WHERE w.run_id=factory_runs.id AND a.status='approved') GROUP BY stage ORDER BY stage LIMIT 5001",
       );
       const configured = [
         { name: "Build", configured: !!env.ICVS_EXECUTOR, stage: "Build" },
@@ -502,11 +668,11 @@ export async function universeApi(
         ),
         rows(
           env,
-          `SELECT c.id,c.name,COUNT(m.id) AS releases,(SELECT COUNT(*) FROM marketplace_downloads d JOIN marketplace_releases r ON r.id=d.release_id WHERE r.creator_id=c.id) AS downloads FROM marketplace_creators c LEFT JOIN marketplace_releases m ON m.creator_id=c.id GROUP BY c.id ORDER BY c.name LIMIT 5001`,
+          `SELECT c.id,c.name,COUNT(m.id) AS releases,(SELECT COUNT(*) FROM marketplace_downloads d JOIN marketplace_releases r ON r.id=d.release_id WHERE r.creator_id=c.id) AS downloads FROM marketplace_creators c LEFT JOIN marketplace_releases m ON m.creator_id=c.id GROUP BY c.id,c.name ORDER BY c.name LIMIT 5001`,
         ),
         rows(
           env,
-          `SELECT m.product_id AS productId,m.creator_id AS creatorId,o.currency,SUM(CASE WHEN o.status='paid' THEN o.price_minor ELSE 0 END) AS paidMinor,SUM(CASE WHEN o.status='refunded' THEN o.price_minor ELSE 0 END) AS refundedMinor FROM marketplace_orders o JOIN marketplace_releases m ON m.id=o.release_id GROUP BY m.product_id,m.creator_id,o.currency LIMIT 5001`,
+          `SELECT m.product_id AS productId,m.creator_id AS creatorId,o.currency,SUM(CASE WHEN o.status='paid' THEN o.price_minor ELSE 0 END) AS paidMinor,SUM(CASE WHEN o.status='refunded' THEN o.price_minor ELSE 0 END) AS refundedMinor FROM marketplace_orders o JOIN marketplace_releases m ON m.id=o.release_id GROUP BY m.product_id,m.creator_id,o.currency ORDER BY o.currency LIMIT 5001`,
         ),
       ]);
       return json({
