@@ -1,3 +1,4 @@
+import { eventStatement } from "./universe-store";
 import { sha256 } from "./access";
 import { connectionStatus } from "../../../portal-os/production";
 import type { Env } from "./types";
@@ -186,6 +187,21 @@ export async function routeModel(
   for (const p of config.providers.filter(
     (p) => !providerId || p.id === providerId,
   )) {
+    if (p.kind !== "local" && !credentials[p.id]) {
+      failures.push({
+        providerId: p.id,
+        reason: "Provider credentials are unconfigured",
+      });
+      await eventStatement(
+        env,
+        "ecosystem:max",
+        "model.unconfigured",
+        "BEMAX",
+        p.id,
+        { providerId: p.id },
+      ).run();
+      continue;
+    }
     const bytes = new TextEncoder().encode(prompt).length;
     if (bytes > p.maxInputBytes) {
       failures.push({
@@ -307,6 +323,9 @@ export async function modelHealth(env: Env) {
     .bind(new Date().toISOString().slice(0, 10))
     .first<number>("reserved");
   return {
+    configurationStatus: config.providers.length
+      ? "CONFIGURED"
+      : "UNCONFIGURED",
     providers: config.providers.map((p) => {
       const observation = observations.find((o) => o.id === p.id)!;
       const status = connectionStatus(
@@ -326,9 +345,11 @@ export async function modelHealth(env: Env) {
         },
         credentialConfigured: p.kind === "local" || !!credentials[p.id],
         status:
-          status === "CONNECTED" && observation.recentFailures > 0
-            ? "DEGRADED"
-            : status,
+          p.kind !== "local" && !credentials[p.id]
+            ? "UNCONFIGURED"
+            : status === "CONNECTED" && observation.recentFailures > 0
+              ? "DEGRADED"
+              : status,
         recentFailures: observation.recentFailures,
         health:
           results.results.find((r) => r.providerId === p.id) ??

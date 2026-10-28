@@ -1,3 +1,4 @@
+import { researchHistory } from "./research-history";
 import { productionRead } from "./production-api";
 import { simulationEvidence, replayEvidence } from "./simulation-evidence";
 import {
@@ -290,6 +291,36 @@ export async function completionApi(
           continuity:
             "Origin, key and identity kind are immutable. State changes and compensation preserve history.",
         });
+      if (path === "/api/icv/revisions") {
+        const entity = await requiredIdentity(
+          env,
+          url.searchParams.get("entityId"),
+        );
+        const after = Number(url.searchParams.get("afterRevision") ?? 0);
+        if (!Number.isSafeInteger(after) || after < 0)
+          throw new InputError("Invalid revision cursor");
+        const rows = await listRows<{ revision: number }>(
+          env,
+          "SELECT * FROM identity_revisions WHERE entity_id=? AND revision>? ORDER BY revision LIMIT 101",
+          entity.id,
+          after,
+        );
+        const records = rows.slice(0, 100);
+        const coverage = await env.DB.prepare(
+          "SELECT MIN(revision) AS startsAtRevision FROM identity_revisions WHERE entity_id=?",
+        )
+          .bind(entity.id)
+          .first();
+        return json({
+          identityId: entity.id,
+          revisions: records,
+          nextAfterRevision:
+            rows.length > 100 ? records[records.length - 1].revision : null,
+          coverage,
+          method:
+            "Immutable snapshots from migration baseline onward; earlier events remain available through identity history.",
+        });
+      }
       if (path === "/api/icv/history") {
         const entity = await requiredIdentity(
           env,
@@ -297,6 +328,7 @@ export async function completionApi(
         );
         return json({
           identity: entity,
+          revisionHistory: `/api/icv/revisions?entityId=${encodeURIComponent(entity.id)}`,
           events: await listRows(
             env,
             "SELECT * FROM universe_events WHERE entity_id=? ORDER BY sequence DESC LIMIT 200",
@@ -339,6 +371,18 @@ export async function completionApi(
             "Promotions and archives retain existing factory approvals, evidence and compensation. Operational proposals require Governor decisions and matching identity revisions.",
         });
       if (path === "/api/sports") return json(await sportsOverview(env));
+      if (path === "/api/institute/history") {
+        const entity = await requiredIdentity(
+          env,
+          url.searchParams.get("entityId"),
+        );
+        if (entity.kind !== "research-output")
+          throw new InputError("Research output required");
+        const page = Number(url.searchParams.get("page") ?? 0);
+        if (!Number.isSafeInteger(page) || page < 0 || page > 1000000)
+          throw new InputError("Invalid history page");
+        return json(await researchHistory(env, entity.id, page));
+      }
       if (path === "/api/institute/lineage") {
         const entity = await requiredIdentity(
           env,
@@ -359,6 +403,7 @@ export async function completionApi(
         const included = new Set(lineage.nodes.map((n) => n.id));
         return json({
           ...lineage,
+          completeHistory: `/api/institute/history?entityId=${encodeURIComponent(entity.id)}`,
           versions: (
             await listRows<{ output_id: string }>(
               env,
@@ -398,11 +443,13 @@ export async function completionApi(
             "standard",
             "research-report",
             "publication",
+            "specification",
           ],
           governance:
             "Draft → reviewed → released; each transition requires an evidence-backed Governor decision. Withdrawal preserves identity and history.",
         });
-      if (path === "/api/models") return json(await modelHealth(env));
+      if (path === "/api/models" || path === "/api/models/capabilities")
+        return json(await modelHealth(env));
       if (path === "/api/substrate/registry")
         return json({
           runs: await listRows(
@@ -477,6 +524,7 @@ export async function completionApi(
         [
           "/api/manifold",
           "/api/manifold/navigation",
+          "/api/manifold/search",
           "/api/manifold/influence",
           "/api/manifold/opportunities",
           "/api/manifold/opportunity",
@@ -485,7 +533,9 @@ export async function completionApi(
         ].includes(path)
       ) {
         const g = await graph(env);
-        const query = url.searchParams.get("q");
+        const query =
+          url.searchParams.get("q") ??
+          (path === "/api/manifold/search" ? "" : null);
         if (query !== null) {
           if (query.length > 200)
             throw new InputError("Search exceeds 200 characters");
@@ -601,7 +651,7 @@ export async function completionApi(
     }
     if (request.method !== "POST")
       return json({ error: "Method not allowed" }, 405);
-    const b = await readObject(request).catch(() => {
+    let b = await readObject(request).catch(() => {
       throw new InputError("Expected a bounded JSON object");
     });
     if (path === "/api/icv/synchronise") {
@@ -719,7 +769,9 @@ export async function completionApi(
         observedAt: new Date().toISOString(),
         status:
           "blocked" in result &&
-          !["DISCONNECTED", "STALE", "BLOCKED"].includes(observed)
+          !["DISCONNECTED", "STALE", "BLOCKED", "UNCONFIGURED"].includes(
+            observed,
+          )
             ? "BLOCKED"
             : observed,
         completed: !("blocked" in result),
@@ -758,7 +810,38 @@ export async function completionApi(
         .run();
       return json({ brief, model: result, memoryId });
     }
-    if (path === "/api/autonomy/proposals") {
+    let generatedReview: ReturnType<typeof briefUniverse> | undefined;
+    if (path === "/api/bemax/reviews") {
+      const question =
+        b.question === undefined
+          ? "What matters most?"
+          : text(b.question, 1000);
+      const brief = briefUniverse(
+        await readUniverse(env),
+        question,
+        await graph(env),
+      );
+      generatedReview = brief;
+      b = {
+        entityId: "ecosystem:max",
+        action: "strategic-review",
+        input: {
+          summary: `${question} ${brief.summary}`.slice(0, 2000),
+          reviewedAt: new Date().toISOString(),
+        },
+        evidence: {
+          sources: brief.sources,
+          facts: [
+            brief.summary,
+            brief.rankingMethod,
+            ...brief.recommendations
+              .slice(0, 8)
+              .map((r) => `${r.entityId}: ${r.action}`),
+          ].map((f) => f.slice(0, 1000)),
+        },
+      };
+    }
+    if (path === "/api/autonomy/proposals" || path === "/api/bemax/reviews") {
       const entity = await requiredIdentity(env, b.entityId),
         action = text(b.action, 80),
         proof = evidence(b.evidence),
@@ -813,7 +896,14 @@ export async function completionApi(
           compensation,
         ),
       ]);
-      return json({ id, status: "pending" }, 201);
+      return json(
+        {
+          id,
+          status: "pending",
+          ...(generatedReview ? { brief: generatedReview } : {}),
+        },
+        201,
+      );
     }
     const decision = path.match(
       /^\/api\/autonomy\/([^/]+)\/(approve|reject|override)$/,
@@ -872,6 +962,7 @@ export async function completionApi(
           "standard",
           "research-report",
           "publication",
+          "specification",
         ].includes(type)
       )
         throw new InputError(

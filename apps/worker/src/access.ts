@@ -100,7 +100,7 @@ export async function protectPortal(
         ) {
           const path = new URL(request.url).pathname;
           const scope =
-            path === "/api/autonomy/proposals"
+            path === "/api/autonomy/proposals" || path === "/api/bemax/reviews"
               ? "autonomy:propose"
               : path === "/api/sports/refresh"
                 ? "sports:refresh"

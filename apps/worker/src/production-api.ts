@@ -31,7 +31,7 @@ export async function productionRead(
         : []),
       ...providers.providers.map((p) => ({
         id: p.id,
-        status: p.status,
+        status: p.status === "UNCONFIGURED" ? "BLOCKED" : p.status,
         kind: p.kind,
       })),
       {

@@ -215,6 +215,11 @@ export default function Completion({ area }: { area: string }) {
                 <p>
                   {data.identity.id} · Revision {data.identity.revision}
                 </p>
+                <Link
+                  to={`/portal/identity-revisions?entityId=${encodeURIComponent(data.identity.id)}`}
+                >
+                  Revision snapshots ↗
+                </Link>
                 <h3>Invariants</h3>
                 <StateFields value={data.identity.invariants} />
                 <h3>Operational state</h3>

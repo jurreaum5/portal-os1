@@ -1,3 +1,4 @@
+import History from "./pages/History";
 import Production from "./pages/Production";
 import Bemax from "./pages/Bemax";
 import Completion from "./pages/Completion";
@@ -70,6 +71,14 @@ createRoot(document.getElementById("root")!).render(
                 element={<Production key={area} area={area} />}
               />
             ))}
+            <Route
+              path="portal/identity-revisions"
+              element={<History kind="identity" />}
+            />
+            <Route
+              path="portal/research-history"
+              element={<History kind="research" />}
+            />
             <Route path="portal/bemax" element={<Bemax />} />
             {[
               "identity",

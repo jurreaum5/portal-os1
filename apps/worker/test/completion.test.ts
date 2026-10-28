@@ -1471,3 +1471,211 @@ it("does not reuse Sports connection evidence after feed configuration changes",
   });
   expect(await sportsHealth(custom)).toBeNull();
 });
+
+describe("Final completion acceptance contracts", () => {
+  it("reports unconfigured credentials without a network request or cost reservation", async () => {
+    await base.DB.prepare("DELETE FROM model_attempts").run();
+    const custom = {
+      ...base,
+      MODEL_CONFIG: JSON.stringify({
+        dailyBudgetMicrousd: 1000000,
+        providers: [
+          {
+            id: "missing-key",
+            kind: "openai",
+            baseUrl: "https://model.test/v1",
+            model: "fixture",
+            inputMicrousdPerToken: 1,
+            outputMicrousdPerToken: 1,
+            maxInputBytes: 1000,
+            maxOutputTokens: 100,
+          },
+        ],
+      }),
+    };
+    const fetcher = vi.spyOn(globalThis, "fetch");
+    const probe = (await (
+      await call("/api/models/check", { providerId: "missing-key" }, custom)
+    ).json()) as { status: string; completed: boolean };
+    expect(probe).toMatchObject({ status: "UNCONFIGURED", completed: false });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(
+      await base.DB.prepare(
+        "SELECT COUNT(*) AS count FROM model_attempts",
+      ).first<number>("count"),
+    ).toBe(0);
+    expect(
+      await base.DB.prepare(
+        "SELECT id FROM universe_events WHERE type='model.unconfigured' AND source='missing-key'",
+      ).first(),
+    ).not.toBeNull();
+    const capabilities = (await (
+      await call("/api/models/capabilities", undefined, custom)
+    ).json()) as { providers: { status: string; capabilities: string[] }[] };
+    expect(capabilities.providers[0]).toMatchObject({
+      status: "UNCONFIGURED",
+      capabilities: ["text-generation"],
+    });
+    const operations = (await (
+      await call("/api/operations/status", undefined, custom)
+    ).json()) as { integrations: { id: string; status: string }[] };
+    expect(
+      operations.integrations.find((p) => p.id === "missing-key")?.status,
+    ).toBe("BLOCKED");
+  });
+  it("exposes the search route and generates a review awaiting policy approval", async () => {
+    expect((await call("/api/manifold/search?q=ecosystem")).status).toBe(200);
+    const before = await identity(base, "ecosystem:max");
+    const proposed = await call("/api/bemax/reviews", {
+      question: "What matters most?",
+    });
+    expect(proposed.status).toBe(201);
+    const p = (await proposed.json()) as { id: string };
+    expect((await identity(base, "ecosystem:max"))?.state).toBe(before?.state);
+    expect((await call(`/api/autonomy/${p.id}/approve`, {})).status).toBe(200);
+    const after = await identity(base, "ecosystem:max");
+    expect(JSON.parse(after!.state).strategicReview.summary).toContain(
+      "What matters most?",
+    );
+    expect(
+      await base.DB.prepare(
+        "SELECT result FROM policy_checks WHERE proposal_id=?",
+      )
+        .bind(p.id)
+        .first(),
+    ).toMatchObject({ result: "passed" });
+  });
+  it("allows scoped review generation but never automation approval", async () => {
+    const token = "synthetic-final-review-token",
+      custom = {
+        ...base,
+        AUTOMATION_CREDENTIALS: JSON.stringify([
+          {
+            id: "strategic-review-generator",
+            tokenSha256: await sha256(token),
+            scopes: ["autonomy:propose"],
+          },
+        ]),
+      };
+    const response = await call("/api/bemax/reviews", {}, custom, token);
+    expect(response.status).toBe(201);
+    const p = (await response.json()) as { id: string };
+    expect(
+      (await call(`/api/autonomy/${p.id}/approve`, {}, custom, token)).status,
+    ).toBe(403);
+  });
+  it("retains identity snapshots across effects and compensation while historical scenarios replay", async () => {
+    const id = await project(),
+      initial = await identity(base, id);
+    const input = {
+      entities: [
+        {
+          id,
+          kind: "project",
+          revision: initial!.revision,
+          position: { x: 0, y: 0, z: 0 },
+          values: { progress: 0 },
+        },
+      ],
+      relationships: [],
+      events: [],
+      uncertainty: [],
+      emergence: [],
+      steps: 1,
+    };
+    const run = (await (
+      await call("/api/substrate/scenarios", input)
+    ).json()) as { id: string };
+    const p = await proposal(id, "risk-escalation", {
+      severity: "high",
+      reason: "Observed dependency risk",
+    });
+    await call(`/api/autonomy/${p.id}/approve`, {});
+    expect((await call("/api/substrate/scenarios", input)).status).toBe(409);
+    const replay = (await (
+      await call(`/api/substrate/scenarios/${run.id}/replay`, {})
+    ).json()) as { matched: boolean };
+    expect(replay.matched).toBe(true);
+    const rollback = await proposal(id, "rollback", { proposalId: p.id });
+    await call(`/api/autonomy/${rollback.id}/approve`, {});
+    const history = (await (
+      await call(`/api/icv/revisions?entityId=${id}`)
+    ).json()) as { revisions: { revision: number; state: string }[] };
+    expect(history.revisions.map((r) => r.revision)).toEqual([1, 2, 3]);
+    expect(history.revisions[0].state).toBe(history.revisions[2].state);
+    expect(JSON.parse(history.revisions[1].state).risk.severity).toBe("high");
+    await expect(
+      base.DB.prepare("DELETE FROM identity_revisions WHERE entity_id=?")
+        .bind(id)
+        .run(),
+    ).rejects.toThrow();
+    await expect(
+      base.DB.prepare("UPDATE universe_identities SET state='{}' WHERE id=?")
+        .bind(id)
+        .run(),
+    ).resolves.toBeDefined(); // exact no-op leaves revision unchanged
+    await expect(
+      base.DB.prepare(
+        "UPDATE universe_identities SET state='{\"altered\":true}' WHERE id=?",
+      )
+        .bind(id)
+        .run(),
+    ).rejects.toThrow();
+  });
+  it("returns complete publication families beyond navigation depth and page limits", async () => {
+    const body = {
+      divisionId: "research:protocol",
+      type: "publication",
+      title: "Publication",
+      source: "https://research.test/publication",
+      evidence: proof,
+    };
+    let first = "",
+      last = "";
+    for (let i = 0; i < 105; i++) {
+      const response = await call("/api/institute/outputs", {
+        ...body,
+        title: `Publication version ${i + 1}`,
+        ...(last ? { predecessorId: last } : {}),
+      });
+      expect(response.status).toBe(201);
+      last = ((await response.json()) as { id: string }).id;
+      if (!first) first = last;
+    }
+    const found = new Set<string>();
+    let page = 0,
+      pages = 0;
+    for (;;) {
+      const response = await call(
+        `/api/institute/history?entityId=${first}&page=${page}`,
+      );
+      expect(response.status).toBe(200);
+      const result = (await response.json()) as {
+        researchRecords: { id: string; version: number }[];
+        pagination: { nextPage: number | null };
+      };
+      for (const r of result.researchRecords) {
+        expect(found.has(r.id)).toBe(false);
+        found.add(r.id);
+      }
+      pages++;
+      if (result.pagination.nextPage === null) break;
+      page = result.pagination.nextPage;
+      expect(pages).toBeLessThan(10);
+    }
+    expect(found.size).toBe(105);
+    expect(found.has(last)).toBe(true);
+    expect(pages).toBeGreaterThan(1);
+    const spec = await call("/api/institute/outputs", {
+      ...body,
+      type: "specification",
+      derivesFrom: [first],
+    });
+    expect(spec.status).toBe(201);
+    const specId = ((await spec.json()) as { id: string }).id;
+    const history = (await (
+      await call(`/api/institute/history?entityId=${specId}`)
+    ).json()) as { researchRecords: { id: string }[] };
+    expect(history.researchRecords.map((r) => r.id)).toContain(first);
+  });
+});

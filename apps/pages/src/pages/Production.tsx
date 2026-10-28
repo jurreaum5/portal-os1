@@ -275,6 +275,15 @@ export default function Production({
               </p>
             </section>
           )}
+          {area === "lineage" && (
+            <p>
+              <Link
+                to={`/portal/research-history?entityId=${encodeURIComponent(root)}`}
+              >
+                Complete research and revision history ↗
+              </Link>
+            </p>
+          )}
           {data.publicationHistory && (
             <section className="panel">
               <h2>Publication history</h2>

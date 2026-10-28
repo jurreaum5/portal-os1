@@ -1,3 +1,4 @@
+import { useGovernor } from "../layouts/GovernorLayout";
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
@@ -50,6 +51,24 @@ interface Brief {
   }[];
 }
 export default function Bemax() {
+  const { role } = useGovernor();
+  async function review() {
+    setWorking(true);
+    setError("");
+    try {
+      const proposal = await api<{ id: string }>("/api/bemax/reviews", {
+        method: "POST",
+        body: JSON.stringify({ question }),
+      });
+      setSummary(
+        `Strategic review ${proposal.id} is pending Governor approval. No operational state has changed.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Review generation failed");
+    } finally {
+      setWorking(false);
+    }
+  }
   const [question, setQuestion] = useState("What should I do next?");
   const [search, setSearch] = useState("");
   const [summary, setSummary] = useState("");
@@ -136,6 +155,11 @@ export default function Bemax() {
             </p>
             <div className="completion-actions">
               <Link to="/portal/autonomy">Governor decisions ↗</Link>
+              {role === "Governor" && (
+                <button disabled={working} onClick={review}>
+                  Generate strategic review
+                </button>
+              )}
               <Link to="/portal/twin">Explore MANIFOLD ↗</Link>
               <button disabled={working} onClick={reason}>
                 {working
