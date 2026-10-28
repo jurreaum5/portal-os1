@@ -78,3 +78,11 @@ Migration 0005 adds QA and audit tables while preserving existing products, deci
 Class-C recovery](docs/09_USS_INSTITUTE.md). Apply additive migration 0008 before
 upgrading the private Worker. Open `/portal/institute` for the Institute console.
 MAX-CORE and the existing factory execution contracts remain unchanged.
+## BEMAX V3 implementation blueprint
+
+The [BEMAX AI Operating System README](docs/bemax/README.md) defines the proposed
+V2-to-V3 transformation: ICV identity, persistent memory, the Manifold, conversation,
+provider-independent reasoning and Governor-controlled actions. It includes route
+and schema contracts, a phased migration and rollback plan, and an
+[acceptance specification](docs/bemax/acceptance.feature). These are implementation
+requirements; V3 runtime capabilities are not yet delivered by this blueprint.
