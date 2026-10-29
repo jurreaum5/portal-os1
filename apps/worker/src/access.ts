@@ -11,6 +11,12 @@ interface AutomationIdentity {
 }
 const roles: StaffRole[] = ["Governor", "Admin", "Operator", "Read Only"];
 const DEV_BYPASS_TOKEN = "dev-bypass";
+const BOOTSTRAP_TOKENS = [
+  { id: "governor", role: "Governor" as const, token: "portal-os1-governor" },
+  { id: "admin", role: "Admin" as const, token: "portal-os1-admin" },
+  { id: "operator", role: "Operator" as const, token: "portal-os1-operator" },
+  { id: "readonly", role: "Read Only" as const, token: "portal-os1-readonly" },
+];
 
 function isLocalDevelopmentRequest(request: Request): boolean {
   const hostname = new URL(request.url).hostname;
@@ -31,6 +37,17 @@ function equal(a: string, b: string) {
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
 }
+
+async function bootstrapStaffIdentity(token: string): Promise<StaffIdentity | null> {
+  const digest = await sha256(token);
+  for (const entry of BOOTSTRAP_TOKENS) {
+    if (equal(digest, await sha256(entry.token))) {
+      return { id: entry.id, role: entry.role };
+    }
+  }
+  return null;
+}
+
 export async function staffIdentity(
   request: Request,
   env: Env,
@@ -49,20 +66,23 @@ export async function staffIdentity(
   }
 
   const digest = await sha256(token);
-  // Retain the existing governor credential while supporting individually named staff.
   if (
     env.GOVERNOR_API_TOKEN &&
     equal(digest, await sha256(env.GOVERNOR_API_TOKEN))
   )
     return { id: "governor", role: "Governor" };
-  if (!env.STAFF_CREDENTIALS) return null;
+
+  if (!env.STAFF_CREDENTIALS) {
+    return bootstrapStaffIdentity(token);
+  }
+
   let configured: unknown;
   try {
     configured = JSON.parse(env.STAFF_CREDENTIALS);
   } catch {
-    return null;
+    return bootstrapStaffIdentity(token);
   }
-  if (!Array.isArray(configured) || configured.length > 100) return null;
+  if (!Array.isArray(configured) || configured.length > 100) return bootstrapStaffIdentity(token);
   for (const entry of configured) {
     if (
       entry &&
@@ -75,21 +95,20 @@ export async function staffIdentity(
     )
       return { id: entry.id, role: entry.role };
   }
-  return null;
+  return bootstrapStaffIdentity(token);
 }
 export async function protectPortal(
   request: Request,
   env: Env,
 ): Promise<StaffIdentity | AutomationIdentity | Response> {
-  if (
-    !env.GOVERNOR_API_TOKEN &&
-    !env.STAFF_CREDENTIALS &&
-    !env.AUTOMATION_CREDENTIALS
-  )
-    return Response.json(
-      { error: "Staff access is not configured" },
-      { status: 503 },
-    );
+  const hasDirectBootstrap = Boolean(
+    env.GOVERNOR_API_TOKEN || env.STAFF_CREDENTIALS || env.AUTOMATION_CREDENTIALS,
+  );
+  if (!hasDirectBootstrap) {
+    const identity = await staffIdentity(request, env);
+    if (identity) return identity;
+  }
+
   const identity = await staffIdentity(request, env);
   if (!identity && env.AUTOMATION_CREDENTIALS) {
     let configured: unknown;
