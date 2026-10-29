@@ -28,7 +28,9 @@ import TwinGraph from "./pages/TwinGraph";
 import ExecutionWorkers from "./pages/ExecutionWorkers";
 import MarketplaceOperations from "./pages/MarketplaceOperations";
 import GovernorHome from "./pages/GovernorHome";
+import BemaxHome from "./pages/BemaxHome";
 import { useGovernor } from "./layouts/GovernorLayout";
+
 function RoleHome() {
   return (
     <Navigate
@@ -41,6 +43,7 @@ function RoleHome() {
     />
   );
 }
+
 function GovernorOnly({ children }: { children: React.ReactNode }) {
   return useGovernor().role === "Governor" ? (
     children
@@ -51,7 +54,9 @@ function GovernorOnly({ children }: { children: React.ReactNode }) {
     </section>
   );
 }
+
 import "./style.css";
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <GovernorLayout>
@@ -63,6 +68,7 @@ createRoot(document.getElementById("root")!).render(
           <Route element={<MainLayout />}>
             <Route index element={<RoleHome />} />
             <Route path="portal/dashboard" element={<Dashboard />} />
+            <Route path="portal/bemax" element={<BemaxHome />} />
             <Route path="portal/products" element={<Products />} />
             <Route path="portal/products/:id" element={<ProductDetail />} />
             <Route path="portal/pipeline" element={<Pipeline />} />
@@ -99,6 +105,8 @@ createRoot(document.getElementById("root")!).render(
             <Route path="portal/approvals" element={<Approvals />} />
             <Route path="portal/forecasting" element={<Forecasting />} />
 
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="bemax" element={<BemaxHome />} />
             <Route path="portfolio" element={<Portfolio />} />
             <Route path="pipeline" element={<Pipeline />} />
             <Route path="products" element={<Products />} />
