@@ -3,6 +3,7 @@ import { reconcileCompensation } from "./execution";
 import { protectPortal, auditAccess } from "./access";
 import kernel from "./kernel";
 import { routeApi } from "./routes/api";
+import { bemaxApi } from "./bemax";
 import type { Env } from "./types";
 export { ProductFactoryActor } from "./factory";
 export { MicrokernelProcessActor } from "./kernel";
@@ -86,9 +87,11 @@ export default {
       const upstream =
         path === "/api/session"
           ? Response.json(access)
-          : !path.startsWith("/api/") || path.startsWith("/api/kernel/")
-            ? await kernel.fetch(request, env, ctx)
-            : await routeApi(request, env);
+          : path.startsWith("/api/bemax")
+            ? (await bemaxApi(request, env)) ?? (await routeApi(request, env))
+            : !path.startsWith("/api/") || path.startsWith("/api/kernel/")
+              ? await kernel.fetch(request, env, ctx)
+              : await routeApi(request, env);
       if (request.method !== "GET")
         ctx.waitUntil(auditAccess(env, request, access, upstream.status));
       const response = new Response(upstream.body, upstream);
