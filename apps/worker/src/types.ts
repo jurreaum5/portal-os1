@@ -19,4 +19,5 @@ export interface Env {
   GOVERNOR_API_TOKEN?: string;
   ENV?: string;
   ENVIRONMENT?: string;
+  DISABLE_PORTAL_LOGIN?: string;
 }

@@ -15,6 +15,20 @@ export function GovernorLayout({ children }: { children: React.ReactNode }) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const disablePortalLogin =
+    import.meta.env.VITE_DISABLE_PORTAL_LOGIN === "true" || import.meta.env.DEV;
+
+  useEffect(() => {
+    if (disablePortalLogin) {
+      setSession({
+        token: "dev-bypass",
+        id: "dev-bypass",
+        role: "Governor",
+      });
+      setStaffToken("dev-bypass");
+    }
+  }, [disablePortalLogin]);
+
   function signOut() {
     setStaffToken("");
     setSession(null);
@@ -39,6 +53,9 @@ export function GovernorLayout({ children }: { children: React.ReactNode }) {
     } finally {
       setBusy(false);
     }
+  }
+  if (disablePortalLogin && !session) {
+    return <>{children}</>;
   }
   if (!session)
     return (
