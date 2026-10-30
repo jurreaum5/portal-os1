@@ -1,7 +1,8 @@
-import { readUniverse } from "../universe-api";
-import { staffIdentity } from "../access";
-import { readObject } from "../customer-auth";
-import type { Env } from "../types";
+import { readUniverse } from "./universe-api";
+import { staffIdentity } from "./access";
+import { readObject } from "./customer-auth";
+import { providers as listProviders } from "./providers";
+import type { Env } from "./types";
 
 const conversations = new Map<
   string,
@@ -22,7 +23,16 @@ const conversations = new Map<
 const json = (value: unknown, status = 200) =>
   Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 
-function evidenceFromProduct(product: { id: string; name: string; score: number; risk: number; revenue: number; status: string; stage: string; previousRevenue: number | null }) {
+function evidenceFromProduct(product: {
+  id: string;
+  name: string;
+  score: number;
+  risk: number;
+  revenue: number;
+  status: string;
+  stage: string;
+  previousRevenue: number | null;
+}) {
   return [
     {
       entityId: `product:${product.id}`,
@@ -205,18 +215,279 @@ async function getBrief(type: string, env: Env) {
   };
 }
 
-export async function bemaxApi(request: Request, env: Env): Promise<Response | null> {
+async function getCompatSummary(env: Env) {
+  const universe = await readUniverse(env);
+  const approvals = await env.DB.prepare(
+    `SELECT a.id, a.product_id AS productId, p.name AS project, a.action, a.priority, a.risk, a.status
+     FROM approvals a
+     JOIN products p ON p.id = a.product_id
+     ORDER BY a.created_at DESC
+     LIMIT 100`,
+  ).all<{
+    id: string;
+    productId: string;
+    project: string;
+    action: string;
+    priority: string;
+    risk: string;
+    status: string;
+  }>();
+
+  const risks = (universe.products ?? []).filter((product) => Number(product.risk ?? 0) > 0 || product.status === "Attention")
+    .map((product) => ({
+      id: product.id,
+      name: product.name,
+      risk: Number(product.risk ?? 0),
+      score: product.score,
+      stage: product.stage,
+      status: product.status,
+      evidence: evidenceFromProduct(product as any),
+    }));
+
+  const opportunities = (universe.products ?? []).filter((product) => Boolean(product.promotionCandidate))
+    .map((product) => ({
+      id: product.id,
+      name: product.name,
+      score: product.score,
+      stage: product.stage,
+      status: product.status,
+      reason: "Promotion candidate under current portfolio heuristics.",
+    }));
+
+  const providerHealth = (await listProviders(env)).map((provider) => ({
+    id: provider.id,
+    name: provider.name,
+    status: provider.status,
+    models: provider.models,
+    capabilities: provider.capabilities,
+    spentUsd: provider.spentUsd,
+  }));
+
+  const simulationActivity = (universe.runs ?? []).slice(0, 20).map((run) => ({
+    id: run.id,
+    productId: run.productId,
+    stage: run.stage,
+    status: run.status,
+    message: run.message,
+  }));
+
+  return {
+    status: {
+      health: universe.summary?.ecosystemHealth ?? "HEALTHY",
+      products: universe.products.length,
+      divisions: universe.divisions.length,
+      sampledAt: universe.sampledAt,
+    },
+    risks,
+    opportunities,
+    approvals: approvals.results,
+    providerHealth,
+    simulationActivity,
+    recommendedActions: await buildRecommendations(env),
+  };
+}
+
+export async function compatibilityApi(
+  request: Request,
+  env: Env,
+): Promise<Response | null> {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  if (!path.startsWith("/api/bemax")) return null;
+  if (
+    !path.startsWith("/api/bemax") &&
+    !path.startsWith("/api/providers") &&
+    !path.startsWith("/api/governor") &&
+    !path.startsWith("/api/uss")
+  ) {
+    return null;
+  }
 
   const identity = await staffIdentity(request, env);
   if (!identity) {
-    return Response.json({ error: "Staff sign-in required" }, { status: 401 });
+    return json({ error: "Staff sign-in required" }, 401);
   }
 
   try {
+    if (path === "/api/bemax/summary" && request.method === "GET") {
+      return json(await getCompatSummary(env));
+    }
+
+    if (path === "/api/bemax/risks" && request.method === "GET") {
+      const universe = await readUniverse(env);
+      return json({
+        risks: (universe.products ?? []).filter((product) => Number(product.risk ?? 0) > 0 || product.status === "Attention")
+          .map((product) => ({
+            id: product.id,
+            name: product.name,
+            risk: Number(product.risk ?? 0),
+            score: product.score,
+            stage: product.stage,
+            status: product.status,
+            evidence: evidenceFromProduct(product as any),
+          })),
+      });
+    }
+
+    if (path === "/api/bemax/opportunities" && request.method === "GET") {
+      const universe = await readUniverse(env);
+      return json({
+        opportunities: (universe.products ?? []).filter((product) => Boolean(product.promotionCandidate))
+          .map((product) => ({
+            id: product.id,
+            name: product.name,
+            score: product.score,
+            stage: product.stage,
+            status: product.status,
+            reason: "Promotion candidate under current portfolio heuristics.",
+          })),
+      });
+    }
+
+    if (path === "/api/providers/health" && request.method === "GET") {
+      const providers = await listProviders(env);
+      return json({
+        providers: providers.map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          type: provider.type,
+          status: provider.status,
+          healthStatus: provider.healthStatus,
+          models: provider.models,
+          capabilities: provider.capabilities,
+          spentUsd: provider.spentUsd,
+          reason: provider.reason,
+        })),
+      });
+    }
+
+    if (path === "/api/providers/models" && request.method === "GET") {
+      const providers = await listProviders(env);
+      return json({
+        models: providers.flatMap((provider) =>
+          provider.models.map((model) => ({
+            providerId: provider.id,
+            provider: provider.name,
+            model,
+            capabilities: provider.capabilities,
+          })),
+        ),
+      });
+    }
+
+    if (path === "/api/governor/summary" && request.method === "GET") {
+      if (identity.role !== "Governor") {
+        return json({ error: "Governor permission required" }, 403);
+      }
+      const universe = await readUniverse(env);
+      const approvals = await env.DB.prepare(
+        `SELECT a.id, a.product_id AS productId, p.name AS project, a.action, a.status
+         FROM approvals a
+         JOIN products p ON p.id = a.product_id
+         ORDER BY a.created_at DESC
+         LIMIT 100`,
+      ).all<{ id: string; productId: string; project: string; action: string; status: string }>();
+      return json({
+        criticalIssues: (universe.products ?? []).filter((product) => Number(product.risk ?? 0) > 0 || product.status === "Attention")
+          .map((product) => ({
+            id: product.id,
+            name: product.name,
+            risk: Number(product.risk ?? 0),
+            stage: product.stage,
+            status: product.status,
+          })),
+        approvals: approvals.results,
+        risks: (universe.products ?? []).filter((product) => Number(product.risk ?? 0) > 0)
+          .map((product) => ({
+            id: product.id,
+            name: product.name,
+            risk: Number(product.risk ?? 0),
+          })),
+        opportunities: (universe.products ?? []).filter((product) => Boolean(product.promotionCandidate))
+          .map((product) => ({
+            id: product.id,
+            name: product.name,
+            score: product.score,
+          })),
+        recommendations: await buildRecommendations(env),
+      });
+    }
+
+    if (path === "/api/governor/approvals" && request.method === "GET") {
+      if (identity.role !== "Governor") {
+        return json({ error: "Governor permission required" }, 403);
+      }
+      const approvals = await env.DB.prepare(
+        `SELECT a.id, a.product_id AS productId, p.name AS project, a.action, a.status
+         FROM approvals a
+         JOIN products p ON p.id = a.product_id
+         ORDER BY a.created_at DESC
+         LIMIT 100`,
+      ).all<{ id: string; productId: string; project: string; action: string; status: string }>();
+      return json({ approvals: approvals.results });
+    }
+
+    if (path === "/api/governor/risks" && request.method === "GET") {
+      if (identity.role !== "Governor") {
+        return json({ error: "Governor permission required" }, 403);
+      }
+      const universe = await readUniverse(env);
+      return json({
+        risks: (universe.products ?? []).filter((product) => Number(product.risk ?? 0) > 0 || product.status === "Attention")
+          .map((product) => ({
+            id: product.id,
+            name: product.name,
+            risk: Number(product.risk ?? 0),
+            severity: Number(product.risk ?? 0) > 50 ? "high" : "medium",
+            source: product.status,
+            confidence: Number(product.score ?? 0) > 0 ? "medium" : "low",
+          })),
+      });
+    }
+
+    if (path === "/api/uss/overview" && request.method === "GET") {
+      const universe = await readUniverse(env);
+      return json({
+        schemaVersion: 1,
+        overview: {
+          products: universe.products.length,
+          divisions: universe.divisions.length,
+          portfolioScore: universe.summary.portfolioScore,
+          ecosystemHealth: universe.summary.ecosystemHealth,
+        },
+        research: { count: universe.products.length },
+        framework: { count: universe.divisions.length },
+        standards: { count: universe.products.length },
+        protocol: { count: universe.runs.length },
+        policy: { count: 0 },
+        generatedAt: new Date().toISOString(),
+      });
+    }
+
+    if (path === "/api/uss/records" && request.method === "GET") {
+      const universe = await readUniverse(env);
+      const page = Number(url.searchParams.get("page") ?? "1");
+      const perPage = Number(url.searchParams.get("perPage") ?? "25");
+      const safePage = Number.isFinite(page) && page > 0 ? page : 1;
+      const safePerPage = Number.isFinite(perPage) && perPage > 0 ? Math.min(perPage, 100) : 25;
+      const records = (universe.products ?? []).slice((safePage - 1) * safePerPage, safePage * safePerPage).map((product) => ({
+        id: product.id,
+        name: product.name,
+        stage: product.stage,
+        status: product.status,
+        score: product.score,
+        risk: Number(product.risk ?? 0),
+      }));
+      return json({
+        records,
+        pagination: {
+          page: safePage,
+          perPage: safePerPage,
+          total: universe.products.length,
+        },
+      });
+    }
+
     if (path === "/api/bemax/context") {
       return json({
         schemaVersion: 1,
@@ -313,7 +584,7 @@ export async function bemaxApi(request: Request, env: Env): Promise<Response | n
         }
         const message = {
           id: crypto.randomUUID(),
-          role: "user",
+          role: "user" as const,
           content,
           createdAt: new Date().toISOString(),
         };
@@ -321,7 +592,7 @@ export async function bemaxApi(request: Request, env: Env): Promise<Response | n
         entry.messages.push({
           id: crypto.randomUUID(),
           role: "assistant",
-          content: `I reviewed the current ecosystem state and found the most relevant action is to focus on the highest-risk or highest-value signals before approving change.`,
+          content: "I reviewed the current ecosystem state and found the most relevant action is to focus on the highest-risk or highest-value signals before approving change.",
           createdAt: new Date().toISOString(),
         });
         return json({
@@ -352,9 +623,11 @@ export async function bemaxApi(request: Request, env: Env): Promise<Response | n
       });
     }
 
-    return json({ error: "BEMAX route not found" }, 404);
+    return json({ error: "Compatibility route not found" }, 404);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return json({ error: message }, 500);
   }
 }
+
+export { conversations };

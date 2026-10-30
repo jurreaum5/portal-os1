@@ -3,7 +3,7 @@ import { reconcileCompensation } from "./execution";
 import { protectPortal, auditAccess } from "./access";
 import kernel from "./kernel";
 import { routeApi } from "./routes/api";
-import { bemaxApi } from "./bemax";
+import { bemaxApi, compatibilityApi } from "./bemax";
 import type { Env } from "./types";
 export { ProductFactoryActor } from "./factory";
 export { MicrokernelProcessActor } from "./kernel";
@@ -84,14 +84,25 @@ export default {
         headers.forEach((value, key) => access.headers.set(key, value));
         return access;
       }
+
+      const compat =
+        path.startsWith("/api/bemax") ||
+        path.startsWith("/api/providers") ||
+        path.startsWith("/api/governor") ||
+        path.startsWith("/api/uss")
+          ? await compatibilityApi(request, env)
+          : null;
+
       const upstream =
         path === "/api/session"
           ? Response.json(access)
-          : path.startsWith("/api/bemax")
-            ? (await bemaxApi(request, env)) ?? (await routeApi(request, env))
-            : !path.startsWith("/api/") || path.startsWith("/api/kernel/")
-              ? await kernel.fetch(request, env, ctx)
-              : await routeApi(request, env);
+          : compat ??
+              (path.startsWith("/api/bemax")
+                ? (await bemaxApi(request, env)) ?? (await routeApi(request, env))
+                : !path.startsWith("/api/") || path.startsWith("/api/kernel/")
+                  ? await kernel.fetch(request, env, ctx)
+                  : await routeApi(request, env));
+
       if (request.method !== "GET")
         ctx.waitUntil(auditAccess(env, request, access, upstream.status));
       const response = new Response(upstream.body, upstream);
