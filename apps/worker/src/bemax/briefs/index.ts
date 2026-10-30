@@ -22,7 +22,7 @@ export class BriefService {
   constructor(private readonly env: any) {}
 
   async getDailyBrief(): Promise<DailyBrief> {
-    const { readUniverse } = await import("../universe-api");
+    const { readUniverse } = await import("../../universe-api");
     const universe = await readUniverse(this.env);
 
     const riskProducts = universe.products.filter((product: any) => product.risk > 0).slice(0, 3);
